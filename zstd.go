@@ -290,10 +290,12 @@ func AppendUnzstdBytes(dst, src []byte) ([]byte, error) {
 // ErrBodyTooLarge when src unzstds to more than maxBodySize bytes. The data
 // already in dst doesn't count towards the limit.
 //
-// The limit also caps the zstd decoder window. The cap is rounded up to an
-// 8 MiB boundary and uses the format's 1 KiB minimum window when maxBodySize
-// is smaller. A valid stream that requires a larger window returns
-// ErrBodyTooLarge.
+// The limit also caps the zstd decoder window, in steps of 8 MiB: the cap is
+// maxBodySize rounded up to a multiple of 8 MiB, and the 1 KiB minimum window
+// of the format is rounded up in the same way, so it is never below 8 MiB. A
+// frame whose window is within the cap is decoded whatever maxBodySize is, and
+// only the limit on the decoded data applies to it. A valid frame that
+// requires a larger window returns ErrBodyTooLarge.
 //
 // The returned dst holds the data that was unzstded before an error.
 //

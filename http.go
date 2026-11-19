@@ -733,10 +733,12 @@ func (req *Request) BodyUnzstd() ([]byte, error) {
 // BodyUnzstdWithLimit returns un-zstd body data and limits the size
 // of uncompressed body data to maxBodySize bytes.
 //
-// The limit also caps the zstd decoder window. The cap is rounded up to an
-// 8 MiB boundary and uses the format's 1 KiB minimum window when maxBodySize
-// is smaller. A valid stream that requires a larger window returns
-// ErrBodyTooLarge.
+// The limit also caps the zstd decoder window, in steps of 8 MiB: the cap is
+// maxBodySize rounded up to a multiple of 8 MiB, and the 1 KiB minimum window
+// of the format is rounded up in the same way, so it is never below 8 MiB. A
+// frame whose window is within the cap is decoded whatever maxBodySize is, and
+// only the limit on the decoded data applies to it. A valid frame that
+// requires a larger window returns ErrBodyTooLarge.
 //
 // If maxBodySize <= 0, then no limit is applied.
 func (req *Request) BodyUnzstdWithLimit(maxBodySize int) ([]byte, error) {
@@ -750,10 +752,12 @@ func (resp *Response) BodyUnzstd() ([]byte, error) {
 // BodyUnzstdWithLimit returns un-zstd body data and limits the size
 // of uncompressed body data to maxBodySize bytes.
 //
-// The limit also caps the zstd decoder window. The cap is rounded up to an
-// 8 MiB boundary and uses the format's 1 KiB minimum window when maxBodySize
-// is smaller. A valid stream that requires a larger window returns
-// ErrBodyTooLarge.
+// The limit also caps the zstd decoder window, in steps of 8 MiB: the cap is
+// maxBodySize rounded up to a multiple of 8 MiB, and the 1 KiB minimum window
+// of the format is rounded up in the same way, so it is never below 8 MiB. A
+// frame whose window is within the cap is decoded whatever maxBodySize is, and
+// only the limit on the decoded data applies to it. A valid frame that
+// requires a larger window returns ErrBodyTooLarge.
 //
 // If maxBodySize <= 0, then no limit is applied.
 func (resp *Response) BodyUnzstdWithLimit(maxBodySize int) ([]byte, error) {
@@ -793,10 +797,12 @@ func (req *Request) BodyUncompressed() ([]byte, error) {
 // BodyUncompressedWithLimit returns body data and if needed decompresses it from gzip,
 // deflate, brotli or zstd. The size of uncompressed data is limited to maxBodySize bytes.
 //
-// For zstd bodies, the limit also caps the decoder window. The cap is rounded
-// up to an 8 MiB boundary and uses the format's 1 KiB minimum window when
-// maxBodySize is smaller. A valid stream that requires a larger window
-// returns ErrBodyTooLarge.
+// For zstd bodies, the limit also caps the decoder window, in steps of 8 MiB:
+// the cap is maxBodySize rounded up to a multiple of 8 MiB, and the 1 KiB
+// minimum window of the format is rounded up in the same way, so it is never
+// below 8 MiB. A frame whose window is within the cap is decoded whatever
+// maxBodySize is, and only the limit on the decoded data applies to it. A valid
+// frame that requires a larger window returns ErrBodyTooLarge.
 //
 // If maxBodySize <= 0, then no limit is applied.
 func (req *Request) BodyUncompressedWithLimit(maxBodySize int) ([]byte, error) {
@@ -831,10 +837,12 @@ func (resp *Response) BodyUncompressed() ([]byte, error) {
 // BodyUncompressedWithLimit returns body data and if needed decompresses it from gzip,
 // deflate, brotli or zstd. The size of uncompressed data is limited to maxBodySize bytes.
 //
-// For zstd bodies, the limit also caps the decoder window. The cap is rounded
-// up to an 8 MiB boundary and uses the format's 1 KiB minimum window when
-// maxBodySize is smaller. A valid stream that requires a larger window
-// returns ErrBodyTooLarge.
+// For zstd bodies, the limit also caps the decoder window, in steps of 8 MiB:
+// the cap is maxBodySize rounded up to a multiple of 8 MiB, and the 1 KiB
+// minimum window of the format is rounded up in the same way, so it is never
+// below 8 MiB. A frame whose window is within the cap is decoded whatever
+// maxBodySize is, and only the limit on the decoded data applies to it. A valid
+// frame that requires a larger window returns ErrBodyTooLarge.
 //
 // If maxBodySize <= 0, then no limit is applied.
 func (resp *Response) BodyUncompressedWithLimit(maxBodySize int) ([]byte, error) {
