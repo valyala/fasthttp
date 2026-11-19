@@ -62,6 +62,21 @@ func TestRequestHeaderHasAcceptEncodingTokens(t *testing.T) {
 	}
 }
 
+func TestRequestHeaderHasAcceptEncodingRepeatedField(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	wire := "GET / HTTP/1.1\r\nHost: example.com\r\nAccept-Encoding: deflate\r\nAccept-Encoding: gzip;q=0\r\nAccept-Encoding: br\r\n\r\n"
+	if err := h.Read(bufio.NewReader(strings.NewReader(wire))); err != nil {
+		t.Fatal(err)
+	}
+	for encoding, want := range map[string]bool{"deflate": true, "gzip": false, "br": true, "zstd": false} {
+		if got := h.HasAcceptEncoding(encoding); got != want {
+			t.Errorf("HasAcceptEncoding(%q) = %v, want %v", encoding, got, want)
+		}
+	}
+}
+
 func TestCompressHandlerAcceptEncodingTokens(t *testing.T) {
 	t.Parallel()
 
