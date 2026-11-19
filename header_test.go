@@ -4741,6 +4741,60 @@ func TestAddVaryHeaderExistingAcceptEncoding(t *testing.T) {
 	}
 }
 
+func TestAddVaryHeaderKeepsAdditionalLines(t *testing.T) {
+	t.Parallel()
+
+	var h ResponseHeader
+	h.Add("Vary", "Origin")
+	h.Add("Vary", "Cookie")
+	h.addVaryBytes([]byte("Accept-Encoding"))
+
+	got := h.PeekAll("Vary")
+	lines := make([]string, len(got))
+	for i, v := range got {
+		lines[i] = string(v)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 Vary lines, got %d: %q", len(lines), lines)
+	}
+	if lines[0] != "Origin,Accept-Encoding" {
+		t.Fatalf("unexpected first Vary line %q", lines[0])
+	}
+	if lines[1] != "Cookie" {
+		t.Fatalf("later Vary line was dropped: %q", lines)
+	}
+
+	var buf bytes.Buffer
+	if _, err := h.WriteTo(&buf); err != nil {
+		t.Fatalf("unexpected error when writing header: %v", err)
+	}
+	s := buf.String()
+	if !strings.Contains(s, "Vary: Origin,Accept-Encoding") {
+		t.Fatalf("missing merged first Vary line in %q", s)
+	}
+	if !strings.Contains(s, "Vary: Cookie") {
+		t.Fatalf("later Vary line was dropped in %q", s)
+	}
+}
+
+func TestAddVaryHeaderExistingOnLaterLine(t *testing.T) {
+	t.Parallel()
+
+	var h ResponseHeader
+	h.Add("Vary", "Origin")
+	h.Add("Vary", "Accept-Encoding")
+	h.addVaryBytes([]byte("Accept-Encoding"))
+
+	got := h.PeekAll("Vary")
+	lines := make([]string, len(got))
+	for i, v := range got {
+		lines[i] = string(v)
+	}
+	if len(lines) != 2 || lines[0] != "Origin" || lines[1] != "Accept-Encoding" {
+		t.Fatalf("unexpected Vary lines %q", lines)
+	}
+}
+
 func TestRequestHeaderExtraWhitespace(t *testing.T) {
 	var h RequestHeader
 

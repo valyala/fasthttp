@@ -436,16 +436,27 @@ func (h *ResponseHeader) SetContentEncodingBytes(contentEncoding []byte) {
 	h.contentEncoding = initHeaderValueBytes(h.contentEncoding, contentEncoding)
 }
 
-// addVaryBytes add value to the 'Vary' header if it's not included.
+// addVaryBytes adds value to the Vary header if it is not already present.
+// Set would replace every existing Vary line, so the first line is extended
+// in place and any additional lines are kept.
 func (h *ResponseHeader) addVaryBytes(value []byte) {
-	v := h.peek(strVary)
-	if len(v) == 0 {
-		// 'Vary' is not set
+	var first *argsKV
+	for i := range h.h {
+		if !caseInsensitiveCompare(h.h[i].key, strVary) {
+			continue
+		}
+		if first == nil {
+			first = &h.h[i]
+		}
+		if bytes.Contains(h.h[i].value, value) {
+			return
+		}
+	}
+	if first == nil {
 		h.SetBytesV(HeaderVary, value)
-	} else if !bytes.Contains(v, value) {
-		// 'Vary' is set and not contains target value
-		h.SetBytesV(HeaderVary, append(append(v, ','), value...))
-	} // else: 'Vary' is set and contains target value
+		return
+	}
+	first.value = append(append(first.value, ','), value...)
 }
 
 // Server returns Server header value.
