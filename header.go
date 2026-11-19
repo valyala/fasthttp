@@ -825,13 +825,15 @@ var (
 //
 // It is not returned for a fault in the framing of the message, which RFC 9112,
 // section 6.3 has a server answer with 400 (Bad Request): a list that is not
-// well formed, parameters on chunked, which defines none, chunked applied more
-// than once, a request whose list doesn't end in chunked such as "gzip" or
-// "chunked, identity", a repeated field, or one in an HTTP/1.0 request. Those
-// are reported as before, as an ErrUnsupportedTransferEncoding with
-// Server.SecureErrorLogMessage and as plain text without it. In a response,
-// codings after chunked are not a fault, the body runs to the end of the
-// connection, so "chunked, gzip" is an unknown coding there.
+// well formed, parameters on chunked or on compress, deflate and gzip, with
+// x-compress and x-gzip, which define none (RFC 9112, sections 7.1 and 7.2),
+// chunked applied more than once, a request whose list doesn't end in chunked
+// such as "gzip" or "chunked, identity", a repeated field, or one in an
+// HTTP/1.0 request. Those are reported as before, as an
+// ErrUnsupportedTransferEncoding with Server.SecureErrorLogMessage and as plain
+// text without it. In a response, codings after chunked are not a fault, the
+// body runs to the end of the connection, so "chunked, gzip" is an unknown
+// coding there.
 //
 // It matches ErrUnsupportedTransferEncoding too, which is what an unknown
 // coding was reported as with Server.SecureErrorLogMessage.
@@ -896,7 +898,10 @@ func faultWithUnknownCoding(err error, secureErrorLogMessage bool) error {
 // message (RFC 9112, sections 6.1 and 6.3).
 //
 // Each coding is a token with optional parameters (RFC 9110, section 10.1.4),
-// and chunked takes none (RFC 9112, section 7.1). Chunked can't be applied
+// but chunked takes none (RFC 9112, section 7.1), and neither do compress,
+// deflate and gzip, with x-compress and x-gzip (section 7.2): a parameter on
+// them is a fault in the message, as it is on chunked. A coding of another name
+// is an extension that can define its own parameters. Chunked can't be applied
 // twice. A request has to end in chunked, or the length of its body can't be
 // told. A response that doesn't, or that has codings after chunked, runs to
 // the end of the connection, which fasthttp doesn't read with another coding
@@ -924,8 +929,11 @@ func isUnknownTransferCoding(v []byte, request bool) bool {
 		}
 		isChunked := caseInsensitiveCompare(coding, strChunked)
 		switch {
-		case isChunked && (chunked || params):
-			// Chunked applied twice, or with parameters it doesn't define.
+		case params && definesNoParameters(coding):
+			// Parameters on a coding that defines none.
+			return false
+		case isChunked && chunked:
+			// Chunked applied twice.
 			return false
 		case isChunked:
 			chunked = true
@@ -944,6 +952,30 @@ func isUnknownTransferCoding(v []byte, request bool) bool {
 			v = v[1:]
 		}
 	}
+}
+
+// codingsWithoutParameters are the transfer codings that RFC 9112 defines
+// without parameters: chunked (section 7.1), and compress, deflate and gzip,
+// with x-compress and x-gzip, which a recipient considers to be compress and
+// gzip (section 7.2).
+var codingsWithoutParameters = [][]byte{
+	strChunked,
+	[]byte("compress"),
+	[]byte("x-compress"),
+	strDeflate,
+	strGzip,
+	[]byte("x-gzip"),
+}
+
+// definesNoParameters reports whether the transfer coding is one of
+// codingsWithoutParameters. The names are not case sensitive.
+func definesNoParameters(coding []byte) bool {
+	for _, name := range codingsWithoutParameters {
+		if caseInsensitiveCompare(coding, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseTransferCoding reads a transfer-coding from the start of v, after

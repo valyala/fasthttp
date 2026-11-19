@@ -4733,6 +4733,16 @@ func TestServerErrorHandlerHeaderErrorKinds(t *testing.T) {
 			statusCode: StatusNotImplemented,
 		},
 		{
+			name:       "parameters on gzip",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip;q=1, chunked\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "parameters on an alias of gzip",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: x-gzip;q=1, chunked\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
 			name:       "unknown transfer coding followed by other fields",
 			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\nX-Foo: bar\r\n\r\n",
 			statusCode: StatusNotImplemented,

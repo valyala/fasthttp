@@ -6402,8 +6402,37 @@ func TestHeaderReadTransferEncodingKinds(t *testing.T) {
 		{"x-custom;level=1;mode=fast, chunked", true, true},
 		{`x-custom;note="a,b;c=d", chunked`, true, true},
 		{`x-custom;note="a\"b\\", chunked`, true, true},
-		{"gzip;q=1, chunked", true, true},
 		{"gzip, x-custom;level=1", false, true},
+		{"gzip, x-custom;level=1, chunked", true, true},
+		{"identity;q=1, chunked", true, true},
+		{"br;q=1, chunked", true, true},
+		// The name has to be the very one of a coding that defines no parameters.
+		{"gzipp;q=1, chunked", true, true},
+		{"x-gzipp;q=1, chunked", true, true},
+		{"xgzip;q=1, chunked", true, true},
+		{"gzi;q=1, chunked", true, true},
+
+		// Parameters on a coding that defines none (RFC 9112, section 7.2) are a
+		// fault, as they are on chunked, with the aliases of the codings, with
+		// whatever case and whitespace, and wherever the coding is in the list.
+		{"gzip;q=1, chunked", false, false},
+		{"x-gzip;q=1, chunked", false, false},
+		{"GZIP;q=1, chunked", false, false},
+		{"gzip ; q = 1, chunked", false, false},
+		{`gzip;note="a,b", chunked`, false, false},
+		{"gzip;q=1;level=2, chunked", false, false},
+		{"deflate;level=9, chunked", false, false},
+		{"Deflate;level=9, chunked", false, false},
+		{"compress;x=y, chunked", false, false},
+		{"x-compress;x=y, chunked", false, false},
+		{"X-Compress;x=y, chunked", false, false},
+		{"x-custom, gzip;q=1, chunked", false, false},
+		{"gzip;q=1, x-custom, chunked", false, false},
+		{"gzip,,deflate;level=9,,chunked", false, false},
+		{"gzip;q=1", false, false},
+		{"deflate;level=9", false, false},
+		{"gzip, deflate;level=9", false, false},
+		{"chunked, gzip;q=1", false, false},
 
 		// Parameters that are not well formed.
 		{"x-custom;, chunked", false, false},
@@ -6548,6 +6577,28 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 			message: `unsupported transfer-encoding: "chunked;x=1"`,
 			secure:  ErrUnsupportedTransferEncoding,
 			isNot:   []error{ErrUnknownTransferCoding},
+		},
+		{
+			name:    "request with parameters on gzip",
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip;q=1, chunked\r\n\r\n",
+			message: `unsupported transfer-encoding: "gzip;q=1, chunked"`,
+			secure:  ErrUnsupportedTransferEncoding,
+			isNot:   []error{ErrUnknownTransferCoding},
+		},
+		{
+			name:    "request with parameters on an alias of compress",
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: x-compress;x=y, chunked\r\n\r\n",
+			message: `unsupported transfer-encoding: "x-compress;x=y, chunked"`,
+			secure:  ErrUnsupportedTransferEncoding,
+			isNot:   []error{ErrUnknownTransferCoding},
+		},
+		{
+			name:     "response with parameters on deflate",
+			raw:      "HTTP/1.1 200 OK\r\nTransfer-Encoding: deflate;level=9\r\n\r\n",
+			response: true,
+			message:  `unsupported transfer-encoding: "deflate;level=9"`,
+			secure:   ErrUnsupportedTransferEncoding,
+			isNot:    []error{ErrUnknownTransferCoding},
 		},
 		{
 			// The fault in the framing comes first, whatever the order of the fields.
