@@ -4920,6 +4920,115 @@ func TestServerUnknownTransferCodingComesAfterTargetFaults(t *testing.T) {
 	}
 }
 
+// A fault that comes with an unknown transfer coding is a 400, and with
+// Server.SecureErrorLogMessage its text, which the server logs, holds nothing
+// of the request: the value of a header, the key of one, the port of the Host.
+func TestServerUnknownTransferCodingFaultText(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  string
+		// secret is what the request has that the log is to be kept free of,
+		// and fault what the text of the fault says without the mode.
+		secret, fault string
+	}{
+		{
+			name:   "header value that is not valid",
+			raw:    "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\nX-Test: sek\x01ret\r\n\r\n",
+			secret: "sek",
+			fault:  "invalid header value",
+		},
+		{
+			name:   "header key that is not valid",
+			raw:    "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\nSekret : v\r\n\r\n",
+			secret: "Sekret",
+			fault:  "invalid header key",
+		},
+		{
+			name:   "Host with a port that is not valid",
+			raw:    "POST / HTTP/1.1\r\nHost: example.com:sekret\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			secret: "sekret",
+			fault:  "invalid port",
+		},
+		{
+			name:   "Host that is not valid",
+			raw:    "POST / HTTP/1.1\r\nHost: sekret host\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			secret: "sekret",
+			fault:  "in host name",
+		},
+		{
+			name:   "userinfo in the Host",
+			raw:    "POST / HTTP/1.1\r\nHost: sekret@example.com\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			secret: "sekret",
+			fault:  ErrorInvalidURI.Error(),
+		},
+		{
+			name:   "repeated Content-Length",
+			raw:    "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n",
+			secret: "sekret",
+			fault:  ErrDuplicateContentLength.Error(),
+		},
+	}
+	for _, tt := range tests {
+		for _, secure := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/secure=%v", tt.name, secure), func(t *testing.T) {
+				t.Parallel()
+
+				var handlerErr error
+				s := &Server{
+					Handler:               func(ctx *RequestCtx) {},
+					SecureErrorLogMessage: secure,
+					ErrorHandler: func(ctx *RequestCtx, err error) {
+						handlerErr = err
+						if errors.Is(err, ErrUnknownTransferCoding) {
+							ctx.SetStatusCode(StatusNotImplemented)
+							return
+						}
+						ctx.SetStatusCode(StatusBadRequest)
+					},
+				}
+
+				rw := &readWriter{}
+				rw.r.WriteString(tt.raw)
+				serveErr := s.ServeConn(rw)
+
+				var resp Response
+				if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got := resp.StatusCode(); got != StatusBadRequest {
+					t.Fatalf("unexpected status code %d. Expecting %d", got, StatusBadRequest)
+				}
+
+				// The error that the ErrorHandler gets and the one that ServeConn
+				// returns, which Serve logs, say the same.
+				for what, err := range map[string]error{"ErrorHandler": handlerErr, "ServeConn": serveErr} {
+					if err == nil {
+						t.Fatalf("%s: expecting an error", what)
+					}
+					if errors.Is(err, ErrUnknownTransferCoding) {
+						t.Fatalf("%s: the error %q is an unknown transfer coding, which is a 501", what, err)
+					}
+					text := err.Error()
+					if secure {
+						if !errors.Is(err, ErrUnsupportedTransferEncoding) {
+							t.Fatalf("%s: the error %q isn't the one that the unknown coding was in this mode", what, text)
+						}
+						if strings.Contains(text, tt.secret) {
+							t.Fatalf("%s: the text %q holds %q, which the log is to be kept free of", what, text, tt.secret)
+						}
+						continue
+					}
+					if !strings.Contains(text, tt.fault) {
+						t.Fatalf("%s: the text %q doesn't say what the fault is, %q", what, text, tt.fault)
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestServeConnHijackResetUserValues(t *testing.T) {
 	t.Parallel()
 

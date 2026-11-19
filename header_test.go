@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 )
 
@@ -6466,6 +6467,13 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 		// With Server.SecureErrorLogMessage the error also has to match secure.
 		is    []error
 		isNot []error
+		// plain lists what errors.Is has to match without
+		// Server.SecureErrorLogMessage only: a fault that comes with an unknown
+		// transfer coding is replaced by secure with it.
+		plain []error
+		// secret is text of the request that the error mustn't hold with
+		// Server.SecureErrorLogMessage, which keeps the log free of it.
+		secret string
 	}{
 		{
 			name:    "request with a method that is not valid",
@@ -6530,8 +6538,8 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 			name:    "request with an unknown transfer coding and no Host",
 			raw:     "POST / HTTP/1.1\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
 			message: errRequestHostRequired.Error(),
-			secure:  errRequestHostRequired,
-			is:      []error{errRequestHostRequired},
+			secure:  ErrUnsupportedTransferEncoding,
+			plain:   []error{errRequestHostRequired},
 			isNot:   []error{ErrUnknownTransferCoding},
 		},
 		{
@@ -6540,32 +6548,58 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 			name:    "request with an unknown transfer coding and a Host that is not valid",
 			raw:     "POST / HTTP/1.1\r\nHost: bad host\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
 			message: `invalid character " " in host name`,
-			secure:  InvalidHostError(" "),
-			is:      []error{InvalidHostError(" ")},
+			secure:  ErrUnsupportedTransferEncoding,
+			plain:   []error{InvalidHostError(" ")},
 			isNot:   []error{ErrUnknownTransferCoding},
+		},
+		{
+			// What these faults say holds the value of a header, a key and a
+			// port, which Server.SecureErrorLogMessage keeps out of the log.
+			name:    "request with an unknown transfer coding and a header value that is not valid",
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip, chunked\r\nX-Test: sek\x01ret\r\n\r\n",
+			message: `invalid header value "sek\x01ret"`,
+			secure:  ErrUnsupportedTransferEncoding,
+			isNot:   []error{ErrUnknownTransferCoding},
+			secret:  "sek",
+		},
+		{
+			name:    "request with an unknown transfer coding and a header key that is not valid",
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip, chunked\r\nSekret : v\r\n\r\n",
+			message: `invalid header key "Sekret "`,
+			secure:  ErrUnsupportedTransferEncoding,
+			isNot:   []error{ErrUnknownTransferCoding},
+			secret:  "Sekret",
+		},
+		{
+			name:    "request with an unknown transfer coding and a Host with a port that is not valid",
+			raw:     "POST / HTTP/1.1\r\nHost: example.com:sekret\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			message: `invalid port ":sekret" after host`,
+			secure:  ErrUnsupportedTransferEncoding,
+			isNot:   []error{ErrUnknownTransferCoding},
+			secret:  "sekret",
 		},
 		{
 			name:    "request with an unknown transfer coding and userinfo in the Host",
 			raw:     "POST / HTTP/1.1\r\nHost: user@example.com\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
 			message: ErrorInvalidURI.Error(),
-			secure:  ErrorInvalidURI,
-			is:      []error{ErrorInvalidURI},
+			secure:  ErrUnsupportedTransferEncoding,
+			plain:   []error{ErrorInvalidURI},
 			isNot:   []error{ErrUnknownTransferCoding},
 		},
 		{
 			name:    "request with an unknown transfer coding and userinfo in an absolute-form target",
 			raw:     "POST http://user@example.com/ HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
 			message: ErrorInvalidURI.Error(),
-			secure:  ErrorInvalidURI,
-			is:      []error{ErrorInvalidURI},
+			secure:  ErrUnsupportedTransferEncoding,
+			plain:   []error{ErrorInvalidURI},
 			isNot:   []error{ErrUnknownTransferCoding},
 		},
 		{
 			name:    "request with an unknown transfer coding and an absolute-form target without an authority",
 			raw:     "POST http:///path HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
 			message: ErrorInvalidURI.Error(),
-			secure:  ErrorInvalidURI,
-			is:      []error{ErrorInvalidURI},
+			secure:  ErrUnsupportedTransferEncoding,
+			plain:   []error{ErrorInvalidURI},
 			isNot:   []error{ErrUnknownTransferCoding},
 		},
 		{
@@ -6586,8 +6620,8 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 			name:    "request with an unknown transfer coding and a repeated Content-Length",
 			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip, chunked\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n",
 			message: ErrDuplicateContentLength.Error(),
-			secure:  ErrDuplicateContentLength,
-			is:      []error{ErrDuplicateContentLength},
+			secure:  ErrUnsupportedTransferEncoding,
+			plain:   []error{ErrDuplicateContentLength},
 			isNot:   []error{ErrUnknownTransferCoding},
 		},
 		{
@@ -6627,6 +6661,24 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 			response: true,
 			message:  "too many transfer-encoding headers",
 			secure:   ErrUnsupportedTransferEncoding,
+			isNot:    []error{ErrUnknownTransferCoding},
+		},
+		{
+			name:     "response with an unknown transfer coding and a header value that is not valid",
+			raw:      "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, chunked\r\nX-Test: sek\x01ret\r\n\r\n",
+			response: true,
+			message:  `invalid header value "sek\x01ret"`,
+			secure:   ErrUnsupportedTransferEncoding,
+			isNot:    []error{ErrUnknownTransferCoding},
+			secret:   "sek",
+		},
+		{
+			name:     "response with an unknown transfer coding and a repeated Content-Length",
+			raw:      "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, chunked\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n",
+			response: true,
+			message:  ErrDuplicateContentLength.Error(),
+			secure:   ErrUnsupportedTransferEncoding,
+			plain:    []error{ErrDuplicateContentLength},
 			isNot:    []error{ErrUnknownTransferCoding},
 		},
 		{
@@ -6677,9 +6729,16 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 					// The text has to stay what it was, people match on it.
 					t.Fatalf("unexpected error text %q. Expecting %q", parseErr, tt.message)
 				}
-				wantIs := tt.is
+				wantIs := slices.Concat(tt.is, tt.plain)
 				if secure {
 					wantIs = slices.Concat(tt.is, []error{tt.secure})
+					if tt.secret != "" {
+						for _, err := range []error{parseErr, readErr} {
+							if strings.Contains(err.Error(), tt.secret) {
+								t.Fatalf("the error %q holds %q, which the log is to be kept free of", err, tt.secret)
+							}
+						}
+					}
 				}
 				for _, err := range []error{parseErr, readErr} {
 					for _, want := range wantIs {
@@ -6696,4 +6755,115 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 			})
 		}
 	}
+}
+
+// A header that is read in pieces ends in the same error as one that is read
+// whole: the unknown transfer coding that is set aside while the fields after it
+// are read must not make Read give up on a block that is not complete. The
+// header is read a byte at a time, and in two pieces cut at every position,
+// since a piece that holds the coding but not the end of the block is parsed
+// before the rest comes.
+func TestHeaderReadUnknownTransferCodingAcrossReads(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		raw      string
+		response bool
+		// unknown says that the error is ErrUnknownTransferCoding.
+		unknown bool
+	}{
+		{
+			name:    "request",
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip, chunked\r\nX-Test: v\r\n\r\n",
+			unknown: true,
+		},
+		{
+			name: "request with a Host that is not valid",
+			raw:  "POST / HTTP/1.1\r\nTransfer-Encoding: gzip, chunked\r\nHost: bad host\r\n\r\n",
+		},
+		{
+			name: "request with a header value that is not valid",
+			raw:  "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip, chunked\r\nX-Test: sek\x01ret\r\n\r\n",
+		},
+		{
+			name:     "response",
+			raw:      "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, chunked\r\nX-Test: v\r\n\r\n",
+			response: true,
+			unknown:  true,
+		},
+		{
+			name:     "response with a header value that is not valid",
+			raw:      "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, chunked\r\nX-Test: sek\x01ret\r\n\r\n",
+			response: true,
+		},
+	} {
+		for _, secure := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/secure=%v", tc.name, secure), func(t *testing.T) {
+				t.Parallel()
+
+				read := func(r io.Reader) error {
+					br := bufio.NewReader(r)
+					if tc.response {
+						var h ResponseHeader
+						h.secureErrorLogMessage = secure
+						return h.Read(br)
+					}
+					var h RequestHeader
+					h.secureErrorLogMessage = secure
+					return h.Read(br)
+				}
+
+				cause := func(err error) string {
+					if cause := errors.Unwrap(err); cause != nil {
+						return cause.Error()
+					}
+					return err.Error()
+				}
+				whole := read(strings.NewReader(tc.raw))
+				check := func(what string, err error) {
+					t.Helper()
+
+					if err == nil {
+						t.Fatalf("%s: expecting an error", what)
+					}
+					if got := errors.Is(err, ErrUnknownTransferCoding); got != tc.unknown {
+						t.Fatalf("%s: errors.Is(%q, ErrUnknownTransferCoding) = %v. Expecting %v", what, err, got, tc.unknown)
+					}
+					if secure && strings.Contains(err.Error(), "sek") {
+						t.Fatalf("%s: the error %q holds the value of the header, which the log is to be kept free of", what, err)
+					}
+					// The error of a field is returned as soon as the field is complete,
+					// so the size of the buffer in the message depends on how the header
+					// came. The error that the message wraps does not.
+					if got, want := cause(err), cause(whole); got != want {
+						t.Fatalf("%s: the error is %q, and %q when the header is read whole", what, got, want)
+					}
+				}
+				check("whole", whole)
+				check("a byte at a time", read(iotest.OneByteReader(strings.NewReader(tc.raw))))
+				for i := 1; i < len(tc.raw); i++ {
+					check(fmt.Sprintf("two pieces cut at %d", i), read(&twoPiecesReader{pieces: []string{tc.raw[:i], tc.raw[i:]}}))
+				}
+			})
+		}
+	}
+}
+
+// twoPiecesReader returns its pieces one at a time, each by one Read at least,
+// as a connection does.
+type twoPiecesReader struct {
+	pieces []string
+}
+
+func (r *twoPiecesReader) Read(p []byte) (int, error) {
+	if len(r.pieces) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(p, r.pieces[0])
+	r.pieces[0] = r.pieces[0][n:]
+	if r.pieces[0] == "" {
+		r.pieces = r.pieces[1:]
+	}
+	return n, nil
 }

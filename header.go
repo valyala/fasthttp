@@ -818,6 +818,8 @@ var (
 // Implemented). It is reported once the other fields of the header have been
 // read, and the Host and the request target have been found valid as Server
 // does before it reads the body, so that a fault in them is reported instead.
+// With Server.SecureErrorLogMessage that fault is reported as
+// ErrUnsupportedTransferEncoding, which holds none of the message.
 //
 // It is not returned for a fault in the framing of the message, which RFC 9112,
 // section 6.3 has a server answer with 400 (Bad Request): a list that is not
@@ -866,6 +868,24 @@ func transferEncodingError(v []byte, request, secureErrorLogMessage bool) (unkno
 		err = fmt.Errorf("unsupported transfer-encoding: %q", v)
 	}
 	return unknown, err
+}
+
+// deferredCodingError holds the error of an unknown transfer coding that is set
+// aside while the fields after it are read, see RequestHeader.parseHeaders.
+type deferredCodingError struct {
+	err error
+}
+
+// faultWithUnknownCoding is the error for a fault that is found in a message
+// that has an unknown transfer coding too. It is err, unless the log is to be
+// kept free of what the message holds: then it is the fixed error that the
+// unknown coding was reported as in that mode, which is a 400 like err, being
+// no ErrUnknownTransferCoding.
+func faultWithUnknownCoding(err error, secureErrorLogMessage bool) error {
+	if secureErrorLogMessage {
+		return ErrUnsupportedTransferEncoding
+	}
+	return err
 }
 
 // isUnknownTransferCoding reports whether the Transfer-Encoding value v is a
@@ -3938,7 +3958,25 @@ func validateRequestURI(method, requestURI []byte) error {
 	return ErrorInvalidURI
 }
 
+// parseHeaders reads the header fields of a response, and picks the error for
+// one that has an unknown transfer coding: a fault in the other fields comes
+// first, as a 400 would be wrong for the coding, see parseHeaderFields.
 func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
+	var unknownCoding deferredCodingError
+	n, err := h.parseHeaderFields(buf, &unknownCoding)
+	if unknownCoding.err == nil || errors.Is(err, ErrNeedMore) {
+		return n, err
+	}
+	if err != nil {
+		return 0, faultWithUnknownCoding(err, h.secureErrorLogMessage)
+	}
+	return 0, unknownCoding.err
+}
+
+// parseHeaderFields reads the header fields of a response. An unknown transfer
+// coding is not returned but stored in unknownCoding, and the fields after it
+// are read, so that a fault in them is returned instead.
+func (h *ResponseHeader) parseHeaderFields(buf []byte, unknownCoding *deferredCodingError) (int, error) {
 	// 'identity' content-length by default
 	h.contentLength = -2
 
@@ -3948,9 +3986,6 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	var trailers trailerSet
 	transferEncodingSeen := false
 	contentLengthSeen := false
-	// deferredErr is an unknown transfer coding, reported once the other
-	// fields have been read: a fault in them comes first.
-	var deferredErr error
 
 	for s.next() {
 		// Trim trailing whitespace before the colon to normalize headers
@@ -4047,7 +4082,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 					if !unknown {
 						return 0, teErr
 					}
-					deferredErr = teErr
+					unknownCoding.err = teErr
 					continue
 				}
 				h.contentLength = -1
@@ -4070,9 +4105,6 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 		h.connectionClose = true
 		return 0, s.err
 	}
-	if deferredErr != nil {
-		return 0, deferredErr
-	}
 
 	if h.contentLength < 0 {
 		h.contentLengthBytes = h.contentLengthBytes[:0]
@@ -4094,18 +4126,45 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	return s.r, nil
 }
 
+// parseHeaders reads the header fields of a request, and picks the error for
+// one that has an unknown transfer coding. The coding is answered with 501
+// (Not Implemented, RFC 9112, section 6.1), and every other fault of the
+// message with 400, so they come first, and the first one that applies is
+// returned:
+//
+//  1. a fault in the header fields,
+//  2. a fault in the Host or the request target, what Server checks before it
+//     reads the body (RFC 9112, section 3.2),
+//  3. the unknown coding.
+//
+// With Server.SecureErrorLogMessage a fault of 1 or 2 is returned as
+// ErrUnsupportedTransferEncoding, the error the unknown coding was reported
+// as in that mode, since the text of the fault can hold the value of a header,
+// the host or the port, which the mode keeps out of the log. It is still a 400.
 func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err error) {
+	var unknownCoding deferredCodingError
+	headersLen, rawSaved, err = h.parseHeaderFields(buf, &unknownCoding)
+	if unknownCoding.err == nil || errors.Is(err, ErrNeedMore) {
+		return headersLen, rawSaved, err
+	}
+	if err == nil {
+		if err = h.validateTarget(); err == nil {
+			return 0, 0, unknownCoding.err
+		}
+	}
+	return 0, 0, faultWithUnknownCoding(err, h.secureErrorLogMessage)
+}
+
+// parseHeaderFields reads the header fields of a request. An unknown transfer
+// coding is not returned but stored in unknownCoding, and the fields after it
+// are read, so that a fault in them is returned instead.
+func (h *RequestHeader) parseHeaderFields(buf []byte, unknownCoding *deferredCodingError) (headersLen, rawSaved int, err error) {
 	h.contentLength = -2
 
 	contentLengthSeen := false
 	transferEncodingSeen := false
 	hostSeen := false
 	contentTypeSeen := false
-	// deferredErr is an unknown transfer coding, reported once the other
-	// fields have been read and the required ones found, so that a fault in
-	// the message is answered with 400 as RFC 9112, sections 3.2 and 6.3 ask,
-	// rather than with 501.
-	var deferredErr error
 
 	var s headerScanner
 	s.b = buf
@@ -4237,7 +4296,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 					if !unknown {
 						return 0, 0, teErr
 					}
-					deferredErr = teErr
+					unknownCoding.err = teErr
 					continue
 				}
 
@@ -4262,14 +4321,6 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 	if s.err != nil {
 		h.connectionClose = true
 		return 0, 0, s.err
-	}
-	if deferredErr != nil {
-		// A fault in the Host or the target is a fault of the message too
-		// (RFC 9112, section 3.2), and comes before the unknown coding.
-		if err := h.validateTarget(); err != nil {
-			return 0, 0, err
-		}
-		return 0, 0, deferredErr
 	}
 
 	if h.contentLength < 0 {
