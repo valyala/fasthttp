@@ -2261,3 +2261,34 @@ func TestResponseControllerDeadlinesAfterReleaseWriter(t *testing.T) {
 		t.Fatalf("expected ErrNilConnection, got %v", err)
 	}
 }
+
+func TestNewFastHTTPHandlerNoContentTypeSniffWithContentEncoding(t *testing.T) {
+	t.Parallel()
+
+	// A gzip stream, which http.DetectContentType reports as application/x-gzip.
+	body := []byte("\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\xff")
+
+	for _, flush := range []bool{false, true} {
+		handler := NewFastHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Encoding", "gzip")
+			w.Write(body) //nolint:errcheck
+			if flush {
+				w.(http.Flusher).Flush()
+			}
+		}))
+
+		var ctx fasthttp.RequestCtx
+		var req fasthttp.Request
+		req.SetRequestURI("http://example.com/")
+		ctx.Init(&req, nil, nil)
+		handler(&ctx)
+
+		// net/http does not sniff the Content-Type of an encoded body.
+		if ct := ctx.Response.Header.ContentType(); len(ct) != 0 {
+			t.Fatalf("flush=%v: unexpected Content-Type %q for a body with Content-Encoding", flush, ct)
+		}
+		if ce := ctx.Response.Header.ContentEncoding(); string(ce) != "gzip" {
+			t.Fatalf("flush=%v: unexpected Content-Encoding %q, expecting %q", flush, ce, "gzip")
+		}
+	}
+}

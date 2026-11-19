@@ -144,8 +144,11 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				// From net/http.ResponseWriter.Write:
 				// If the Header does not contain a Content-Type line, Write adds a Content-Type set
 				// to the result of passing the initial 512 bytes of written data to DetectContentType.
+				// An encoded body is not sniffed there, and gets no Content-Type.
 				l := min(len(w.responseBody), 512)
-				if l > 0 {
+				if w.Header().Get(fasthttp.HeaderContentEncoding) != "" {
+					ctx.Response.Header.SetNoDefaultContentType(true)
+				} else if l > 0 {
 					ctx.Response.Header.Set(fasthttp.HeaderContentType, http.DetectContentType(w.responseBody[:l]))
 				}
 			}
@@ -195,7 +198,9 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			}
 			if !haveContentType {
 				w.mu.Lock()
-				if len(w.responseBody) > 0 {
+				if w.Header().Get(fasthttp.HeaderContentEncoding) != "" {
+					ctx.Response.Header.SetNoDefaultContentType(true)
+				} else if len(w.responseBody) > 0 {
 					l := min(len(w.responseBody), 512)
 					ctx.Response.Header.Set(fasthttp.HeaderContentType, http.DetectContentType(w.responseBody[:l]))
 				}
