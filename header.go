@@ -837,6 +837,12 @@ var (
 // chunked are not a fault, the body runs to the end of the connection, so
 // "chunked, gzip" is an unknown coding there.
 //
+// It is not returned for a 1xx or 204 response either, which must not have the
+// field whatever coding it names (RFC 9112, section 6.1): a coding in it that
+// fasthttp doesn't read is reported as before too. A 304 response may have the
+// field, to describe the selected representation, so an unknown coding in it
+// is one.
+//
 // It matches ErrUnsupportedTransferEncoding too, which is what an unknown
 // coding was reported as with Server.SecureErrorLogMessage.
 var ErrUnknownTransferCoding = fmt.Errorf("%w: unknown transfer coding", ErrUnsupportedTransferEncoding)
@@ -858,22 +864,21 @@ func classifiedErrorf(err error, format string, args ...any) error {
 }
 
 // transferEncodingError is the error for a Transfer-Encoding value v that
-// fasthttp can't read, in a request or in a response. unknown reports whether
-// it is an ErrUnknownTransferCoding, a well formed list with a coding fasthttp
-// doesn't read, rather than a fault in the framing, which is reported as before.
-func transferEncodingError(v []byte, request, secureErrorLogMessage bool) (unknown bool, err error) {
-	unknown = isUnknownTransferCoding(v, request)
+// fasthttp can't read, in a request or in a response. unknown says whether it
+// is an ErrUnknownTransferCoding, a well formed list with a coding fasthttp
+// doesn't read in a message that may have the field, rather than a fault in
+// the message, which is reported as before.
+func transferEncodingError(v []byte, unknown, secureErrorLogMessage bool) error {
 	switch {
 	case unknown && secureErrorLogMessage:
-		err = ErrUnknownTransferCoding
+		return ErrUnknownTransferCoding
 	case unknown:
-		err = classifiedErrorf(ErrUnknownTransferCoding, "unsupported transfer-encoding: %q", v)
+		return classifiedErrorf(ErrUnknownTransferCoding, "unsupported transfer-encoding: %q", v)
 	case secureErrorLogMessage:
-		err = ErrUnsupportedTransferEncoding
+		return ErrUnsupportedTransferEncoding
 	default:
-		err = fmt.Errorf("unsupported transfer-encoding: %q", v)
+		return fmt.Errorf("unsupported transfer-encoding: %q", v)
 	}
-	return unknown, err
 }
 
 // deferredCodingError holds the error of an unknown transfer coding that is set
@@ -907,7 +912,8 @@ func faultWithUnknownCoding(err error, secureErrorLogMessage bool) error {
 // twice. A request has to end in chunked, or the length of its body can't be
 // told. A response that doesn't, or that has codings after chunked, runs to
 // the end of the connection, which fasthttp doesn't read with another coding
-// applied, so that is an unknown coding too.
+// applied, so that is an unknown coding too. Whether a response may have the
+// field at all, which depends on its status, is for the caller to check.
 //
 // Empty elements of the list are ignored (RFC 9110, section 5.6.1.2), so
 // "gzip,,chunked" is read as "gzip, chunked". The scan is linear in the length
@@ -4129,7 +4135,14 @@ func (h *ResponseHeader) parseHeaderFields(buf []byte, unknownCoding *deferredCo
 				transferEncodingSeen = true
 				if !caseInsensitiveCompare(s.value, strChunked) {
 					h.connectionClose = true
-					unknown, teErr := transferEncodingError(s.value, false, h.secureErrorLogMessage)
+					// A 1xx or 204 response must not have the field, whatever
+					// coding it names (RFC 9112, section 6.1), so a coding in it
+					// that fasthttp doesn't read is the fault it was, and no unknown
+					// coding. A 304 response may have it, to describe the selected
+					// representation: the statuses are the ones the field isn't
+					// written for, see mustSkipContentLengthOnWire.
+					unknown := !h.mustSkipContentLengthOnWire() && isUnknownTransferCoding(s.value, false)
+					teErr := transferEncodingError(s.value, unknown, h.secureErrorLogMessage)
 					if !unknown {
 						return 0, teErr
 					}
@@ -4343,7 +4356,8 @@ func (h *RequestHeader) parseHeaderFields(buf []byte, unknownCoding *deferredCod
 
 				if !isIdentity && !isChunked {
 					h.connectionClose = true
-					unknown, teErr := transferEncodingError(s.value, true, h.secureErrorLogMessage)
+					unknown := isUnknownTransferCoding(s.value, true)
+					teErr := transferEncodingError(s.value, unknown, h.secureErrorLogMessage)
 					if !unknown {
 						return 0, 0, teErr
 					}

@@ -6330,7 +6330,8 @@ func TestResponseHeaderTransferEncodingOnWire(t *testing.T) {
 // 501, only if it is a well formed list with a correct framing. Otherwise it is
 // a fault in the framing of the message, a 400 (RFC 9112, sections 6.1 and 6.3).
 // A request needs chunked as the final coding, a response without it ends with
-// the connection.
+// the connection. A 1xx or 204 response must not have the field at all, so no
+// value is an unknown coding in one.
 func TestHeaderReadTransferEncodingKinds(t *testing.T) {
 	t.Parallel()
 
@@ -6449,15 +6450,39 @@ func TestHeaderReadTransferEncodingKinds(t *testing.T) {
 		{"chunked;x=1", false, false},
 		{"gzip, chunked;x=1", false, false},
 	}
+	// The messages that each value is read in.
+	messages := []struct {
+		name string
+		// status is the status of a response, and 0 for a request.
+		status int
+		// forbidden says that the message must not have the field, whatever
+		// coding it names, so that no value is an unknown coding in it: each is
+		// the fault it was before.
+		forbidden bool
+	}{
+		{name: "request"},
+		{name: "response", status: StatusOK},
+		// RFC 9112, section 6.1 forbids the field in a 1xx or 204 response.
+		{name: "100 response", status: StatusContinue, forbidden: true},
+		{name: "101 response", status: StatusSwitchingProtocols, forbidden: true},
+		{name: "103 response", status: StatusEarlyHints, forbidden: true},
+		{name: "199 response", status: 199, forbidden: true},
+		{name: "204 response", status: StatusNoContent, forbidden: true},
+		// A 304 response may have the field, to describe the selected
+		// representation, and the statuses next to the forbidden ones may as well.
+		{name: "304 response", status: StatusNotModified},
+		{name: "203 response", status: StatusNonAuthoritativeInfo},
+		{name: "205 response", status: StatusResetContent},
+	}
 	for _, tt := range tests {
-		for _, request := range []bool{true, false} {
+		for _, message := range messages {
 			for _, secure := range []bool{false, true} {
-				t.Run(fmt.Sprintf("%q/request=%v/secure=%v", tt.value, request, secure), func(t *testing.T) {
+				t.Run(fmt.Sprintf("%q/%s/secure=%v", tt.value, message.name, secure), func(t *testing.T) {
 					t.Parallel()
 
 					var err error
-					unknown := tt.unknownResponse
-					if request {
+					unknown := tt.unknownResponse && !message.forbidden
+					if message.status == 0 {
 						unknown = tt.unknownRequest
 						var h RequestHeader
 						h.secureErrorLogMessage = secure
@@ -6465,7 +6490,8 @@ func TestHeaderReadTransferEncodingKinds(t *testing.T) {
 					} else {
 						var h ResponseHeader
 						h.secureErrorLogMessage = secure
-						_, err = h.parse([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: " + tt.value + "\r\n\r\n"))
+						_, err = h.parse(fmt.Appendf(nil, "HTTP/1.1 %d %s\r\nTransfer-Encoding: %s\r\n\r\n",
+							message.status, StatusMessage(message.status), tt.value))
 					}
 					if err == nil {
 						t.Fatal("expecting an error")
@@ -6732,6 +6758,61 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 			is:       []error{ErrUnknownTransferCoding, ErrUnsupportedTransferEncoding},
 		},
 		{
+			// A 1xx or 204 response must not have the field, whatever coding it
+			// names, so the coding is no unknown one there but the fault it was.
+			name:     "103 response with a transfer coding",
+			raw:      "HTTP/1.1 103 Early Hints\r\nTransfer-Encoding: gzip\r\n\r\n",
+			response: true,
+			message:  `unsupported transfer-encoding: "gzip"`,
+			secure:   ErrUnsupportedTransferEncoding,
+			isNot:    []error{ErrUnknownTransferCoding},
+		},
+		{
+			name:     "204 response with a transfer coding",
+			raw:      "HTTP/1.1 204 No Content\r\nTransfer-Encoding: gzip\r\n\r\n",
+			response: true,
+			message:  `unsupported transfer-encoding: "gzip"`,
+			secure:   ErrUnsupportedTransferEncoding,
+			isNot:    []error{ErrUnknownTransferCoding},
+		},
+		{
+			name:     "204 response with an unknown transfer coding in front of chunked",
+			raw:      "HTTP/1.1 204 No Content\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			response: true,
+			message:  `unsupported transfer-encoding: "gzip, chunked"`,
+			secure:   ErrUnsupportedTransferEncoding,
+			isNot:    []error{ErrUnknownTransferCoding},
+		},
+		{
+			// The fault is returned where the field is, as before, and not after
+			// the fields that follow it as an unknown coding is.
+			name:     "103 response with a transfer coding and a header value that is not valid",
+			raw:      "HTTP/1.1 103 Early Hints\r\nTransfer-Encoding: gzip\r\nX-Test: sek\x01ret\r\n\r\n",
+			response: true,
+			message:  `unsupported transfer-encoding: "gzip"`,
+			secure:   ErrUnsupportedTransferEncoding,
+			isNot:    []error{ErrUnknownTransferCoding},
+			secret:   "sek",
+		},
+		{
+			name:     "204 response with a transfer coding and a repeated Content-Length",
+			raw:      "HTTP/1.1 204 No Content\r\nTransfer-Encoding: gzip, chunked\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n",
+			response: true,
+			message:  `unsupported transfer-encoding: "gzip, chunked"`,
+			secure:   ErrUnsupportedTransferEncoding,
+			isNot:    []error{ErrUnknownTransferCoding, ErrDuplicateContentLength},
+		},
+		{
+			// A 304 response may have the field, to describe the selected
+			// representation.
+			name:     "304 response with an unknown transfer coding",
+			raw:      "HTTP/1.1 304 Not Modified\r\nTransfer-Encoding: gzip\r\n\r\n",
+			response: true,
+			message:  `unsupported transfer-encoding: "gzip"`,
+			secure:   ErrUnknownTransferCoding,
+			is:       []error{ErrUnknownTransferCoding, ErrUnsupportedTransferEncoding},
+		},
+		{
 			name:     "response with identity as its transfer coding",
 			raw:      "HTTP/1.1 200 OK\r\nTransfer-Encoding: identity\r\n\r\n",
 			response: true,
@@ -6879,6 +6960,12 @@ func TestHeaderReadUnknownTransferCodingAcrossReads(t *testing.T) {
 		{
 			name:     "response with a header value that is not valid",
 			raw:      "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, chunked\r\nX-Test: sek\x01ret\r\n\r\n",
+			response: true,
+		},
+		{
+			// The field is a fault in a 1xx response, which is returned at once.
+			name:     "103 response with a header value that is not valid",
+			raw:      "HTTP/1.1 103 Early Hints\r\nTransfer-Encoding: gzip, chunked\r\nX-Test: sek\x01ret\r\n\r\n",
 			response: true,
 		},
 	} {
