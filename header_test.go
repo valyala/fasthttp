@@ -6348,14 +6348,28 @@ func TestHeaderReadTransferEncodingKinds(t *testing.T) {
 		{"identity, chunked", true, true},
 		{"x-custom, gzip, chunked", true, true},
 
+		// Empty elements of the list are ignored (RFC 9110, section 5.6.1.2).
+		{"gzip,,chunked", true, true},
+		{"gzip, ,chunked", true, true},
+		{"gzip \t,\t, \t,\t chunked", true, true},
+		{",gzip, chunked", true, true},
+		{", ,gzip,chunked", true, true},
+		{"gzip,chunked,", true, true},
+		{"gzip,chunked, ,", true, true},
+		{"x-custom;level=1,,chunked", true, true},
+
 		// Without chunked only a response is framed, by the end of the connection.
 		{"gzip", false, true},
 		{"deflate", false, true},
 		{"gzip, deflate", false, true},
+		{"gzip,", false, true},
+		{",gzip", false, true},
+		{"gzip,,deflate", false, true},
 
 		// Chunked applied twice.
 		{"chunked, chunked", false, false},
 		{"gzip, chunked, chunked", false, false},
+		{"chunked,,chunked", false, false},
 
 		// Chunked not as the final coding: a request can't be framed, while a
 		// response runs to the end of the connection, with a coding fasthttp
@@ -6363,12 +6377,21 @@ func TestHeaderReadTransferEncodingKinds(t *testing.T) {
 		{"chunked, identity", false, true},
 		{"chunked, gzip", false, true},
 		{"gzip, chunked, gzip", false, true},
+		{"chunked,,gzip", false, true},
 
-		// Lists that are not well formed.
+		// A list without a coding that fasthttp doesn't read: chunked alone with
+		// an empty element isn't what fasthttp takes for chunked, and a list
+		// of empty elements holds no coding.
 		{"chunked,", false, false},
 		{",chunked", false, false},
-		{"gzip,,chunked", false, false},
+		{"chunked,,", false, false},
+		{",", false, false},
+		{", ,\t,", false, false},
+
+		// Lists that are not well formed.
 		{"g z, chunked", false, false},
+		{"gzip chunked", false, false},
+		{"gzip,,chunked chunked", false, false},
 		{"gzip(, chunked", false, false},
 		{`"gzip", chunked`, false, false},
 

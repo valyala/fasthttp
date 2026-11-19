@@ -814,6 +814,8 @@ var (
 // ErrUnknownTransferCoding is returned when Transfer-Encoding is a well formed
 // list of transfer codings (RFC 9110, section 10.1.4) that holds a coding
 // fasthttp doesn't read, such as "gzip, chunked" or "x-custom;level=1, chunked".
+// Empty elements of the list are ignored (RFC 9110, section 5.6.1.2), so
+// "gzip,,chunked" is the same as "gzip, chunked".
 // RFC 9112, section 6.1 has a server answer such a request with 501 (Not
 // Implemented). It is reported once the other fields of the header have been
 // read, and the Host and the request target have been found valid as Server
@@ -900,11 +902,22 @@ func faultWithUnknownCoding(err error, secureErrorLogMessage bool) error {
 // the end of the connection, which fasthttp doesn't read with another coding
 // applied, so that is an unknown coding too.
 //
-// The list is read strictly: an empty element, as in "gzip,,chunked", is a
-// fault, since a value that isn't exactly chunked is never accepted either.
+// Empty elements of the list are ignored (RFC 9110, section 5.6.1.2), so
+// "gzip,,chunked" is read as "gzip, chunked". The scan is linear in the length
+// of v, which the size of the header bounds, so the number of empty elements
+// needs no limit.
 func isUnknownTransferCoding(v []byte, request bool) bool {
 	chunked, other := false, false
 	for {
+		v = skipOWS(v)
+		if len(v) == 0 {
+			return other && (chunked || !request)
+		}
+		if v[0] == ',' {
+			// An empty element.
+			v = v[1:]
+			continue
+		}
 		coding, params, rest := parseTransferCoding(v)
 		if coding == nil {
 			return false
@@ -922,14 +935,14 @@ func isUnknownTransferCoding(v []byte, request bool) bool {
 		default:
 			other = true
 		}
+		// What follows the coding is the end of the list, or a comma.
 		v = skipOWS(rest)
-		if len(v) == 0 {
-			return other && (chunked || !request)
+		if len(v) > 0 {
+			if v[0] != ',' {
+				return false
+			}
+			v = v[1:]
 		}
-		if v[0] != ',' {
-			return false
-		}
-		v = v[1:]
 	}
 }
 

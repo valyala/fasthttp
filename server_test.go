@@ -4693,8 +4693,18 @@ func TestServerErrorHandlerHeaderErrorKinds(t *testing.T) {
 			statusCode: StatusNotImplemented,
 		},
 		{
+			name:       "unknown transfer coding with an empty list element",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip,,chunked\r\n\r\n",
+			statusCode: StatusNotImplemented,
+		},
+		{
 			name:       "unknown transfer coding without chunked",
 			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "unknown transfer coding without chunked and an empty list element",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip,,\r\n\r\n",
 			statusCode: StatusBadRequest,
 		},
 		{
