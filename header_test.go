@@ -6714,6 +6714,16 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 			isNot:   []error{ErrUnknownTransferCoding},
 		},
 		{
+			// The field is a fault in HTTP/1.0 whatever it says, so an unknown
+			// coding is not one, and is no more than the plain error in both modes.
+			name:    "HTTP/1.0 request with an unknown transfer coding",
+			raw:     "POST / HTTP/1.0\r\nHost: a\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			message: ErrUnsupportedTransferEncoding.Error(),
+			secure:  ErrUnsupportedTransferEncoding,
+			is:      []error{ErrUnsupportedTransferEncoding},
+			isNot:   []error{ErrUnknownTransferCoding},
+		},
+		{
 			name:     "response with an unknown transfer coding",
 			raw:      "HTTP/1.1 200 OK\r\nTransfer-Encoding: deflate\r\n\r\n",
 			response: true,

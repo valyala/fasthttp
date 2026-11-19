@@ -828,12 +828,14 @@ var (
 // well formed, parameters on chunked or on compress, deflate and gzip, with
 // x-compress and x-gzip, which define none (RFC 9112, sections 7.1 and 7.2),
 // chunked applied more than once, a request whose list doesn't end in chunked
-// such as "gzip" or "chunked, identity", a repeated field, or one in an
-// HTTP/1.0 request. Those are reported as before, as an
+// such as "gzip" or "chunked, identity", a repeated field, or a field in an
+// HTTP/1.0 request, which makes the framing faulty whatever it says (RFC 9112,
+// section 6.1). Those are reported as before, as an
 // ErrUnsupportedTransferEncoding with Server.SecureErrorLogMessage and as plain
-// text without it. In a response, codings after chunked are not a fault, the
-// body runs to the end of the connection, so "chunked, gzip" is an unknown
-// coding there.
+// text without it, except for the HTTP/1.0 request, which is an
+// ErrUnsupportedTransferEncoding in both modes. In a response, codings after
+// chunked are not a fault, the body runs to the end of the connection, so
+// "chunked, gzip" is an unknown coding there.
 //
 // It matches ErrUnsupportedTransferEncoding too, which is what an unknown
 // coding was reported as with Server.SecureErrorLogMessage.

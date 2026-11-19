@@ -4751,6 +4751,11 @@ func TestServerErrorHandlerHeaderErrorKinds(t *testing.T) {
 			statusCode: StatusBadRequest,
 		},
 		{
+			name:       "unknown transfer coding in an HTTP/1.0 request",
+			raw:        "POST / HTTP/1.0\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
 			name:       "unknown transfer coding followed by other fields",
 			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\nX-Foo: bar\r\n\r\n",
 			statusCode: StatusNotImplemented,
