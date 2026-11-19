@@ -1949,7 +1949,6 @@ func (c *HostClient) serveWaiterLocked() bool {
 
 func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool) (cc *clientConn, err error) {
 	createConn := false
-	startCleaner := false
 
 	var n int
 	c.connsLock.Lock()
@@ -1958,10 +1957,6 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 		if c.connsCount < c.maxConnsLocked() {
 			c.connsCount++
 			createConn = true
-			if !c.connsCleanerRun && !connectionClose {
-				startCleaner = true
-				c.connsCleanerRun = true
-			}
 		}
 	} else {
 		switch c.ConnPoolStrategy {
@@ -2030,21 +2025,18 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 		}
 	}
 
-	if startCleaner {
-		go c.connsCleaner()
-	}
-
 	conn, err := c.dialHostHard(reqTimeout)
 	if err != nil {
 		c.decConnsCount()
 		return nil, err
 	}
+
 	cc = acquireClientConn(conn)
 
 	return cc, nil
 }
 
-func (c *HostClient) queueForIdle(w *wantConn, connectionClose bool) {
+func (c *HostClient) queueForIdle(w *wantConn, _ bool) {
 	c.connsLock.Lock()
 	if n := len(c.conns); n > 0 {
 		var cc *clientConn
@@ -2072,18 +2064,11 @@ func (c *HostClient) queueForIdle(w *wantConn, connectionClose bool) {
 	// the connection count, freeing capacity without adding an idle connection.
 	// Reserve the freed slot and dial a replacement connection for w. The conns
 	// cleaner may have exited after observing connsCount == 0 before the slot
-	// was reserved, so restart it as well.
+	// was reserved. The cleaner will restart if the replacement connection is
+	// later returned to the idle pool.
 	if c.connsCount < c.maxConnsLocked() {
 		c.connsCount++
-		startCleaner := false
-		if !c.connsCleanerRun && !connectionClose {
-			c.connsCleanerRun = true
-			startCleaner = true
-		}
 		c.connsLock.Unlock()
-		if startCleaner {
-			go c.connsCleaner()
-		}
 		go c.dialConnFor(w)
 		return
 	}
