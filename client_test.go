@@ -6822,6 +6822,22 @@ func TestAddMissingPort(t *testing.T) {
 			args:     args{addr: "[::1]:8443", isTLS: true},
 			expected: "[::1]:8443",
 		},
+		{
+			args:     args{addr: "example.com:", isTLS: false}, // an empty port is a missing one
+			expected: "example.com:80",
+		},
+		{
+			args:     args{addr: "example.com:", isTLS: true},
+			expected: "example.com:443",
+		},
+		{
+			args:     args{addr: "[::1]:", isTLS: false},
+			expected: "[::1]:80",
+		},
+		{
+			args:     args{addr: "fe80::", isTLS: false},
+			expected: "fe80::", // keep as is
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.expected, func(t *testing.T) {
