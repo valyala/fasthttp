@@ -237,41 +237,61 @@ func TestWriteUnzstdWithLimitDecoderMemory(t *testing.T) {
 		t.Fatalf("small-window frame rejected after changing limits: %v", err)
 	}
 
+	// The zstd decoder has its own 512 MiB window limit, which a cap above it
+	// doesn't raise: a 1 GiB window is rejected with a 1 GiB cap, before
+	// anything is allocated for it.
+	oneGiBWindowFrame := zstdRawFrame(0xa0, []byte{'x'})
+	dst.Reset()
+	n, err = writeUnzstd(&dst, oneGiBWindowFrame, 1<<30)
+	if !errors.Is(err, ErrBodyTooLarge) {
+		t.Fatalf("unexpected error for a window over the decoder's own limit: %v", err)
+	}
+	if n != 0 || dst.Len() != 0 {
+		t.Fatalf("unexpected result for a window over the decoder's own limit: n=%d output=%q", n, dst.Bytes())
+	}
+
 	maliciousWindowFrame := zstdRawFrame(0x98, []byte("AA"))
 	for _, testCase := range []struct {
 		name   string
-		decode func() error
+		decode func(frame []byte, maxBodySize int) error
 	}{
-		{name: "request unzstd", decode: func() error {
+		{name: "request unzstd", decode: func(frame []byte, maxBodySize int) error {
 			var req Request
-			req.SetBodyRaw(maliciousWindowFrame)
-			_, err := req.BodyUnzstdWithLimit(1)
+			req.SetBodyRaw(frame)
+			_, err := req.BodyUnzstdWithLimit(maxBodySize)
 			return err
 		}},
-		{name: "request uncompressed", decode: func() error {
+		{name: "request uncompressed", decode: func(frame []byte, maxBodySize int) error {
 			var req Request
 			req.Header.SetContentEncoding("zstd")
-			req.SetBodyRaw(maliciousWindowFrame)
-			_, err := req.BodyUncompressedWithLimit(1)
+			req.SetBodyRaw(frame)
+			_, err := req.BodyUncompressedWithLimit(maxBodySize)
 			return err
 		}},
-		{name: "response unzstd", decode: func() error {
+		{name: "response unzstd", decode: func(frame []byte, maxBodySize int) error {
 			var resp Response
-			resp.SetBodyRaw(maliciousWindowFrame)
-			_, err := resp.BodyUnzstdWithLimit(1)
+			resp.SetBodyRaw(frame)
+			_, err := resp.BodyUnzstdWithLimit(maxBodySize)
 			return err
 		}},
-		{name: "response uncompressed", decode: func() error {
+		{name: "response uncompressed", decode: func(frame []byte, maxBodySize int) error {
 			var resp Response
 			resp.Header.SetContentEncoding("zstd")
-			resp.SetBodyRaw(maliciousWindowFrame)
-			_, err := resp.BodyUncompressedWithLimit(1)
+			resp.SetBodyRaw(frame)
+			_, err := resp.BodyUncompressedWithLimit(maxBodySize)
+			return err
+		}},
+		{name: "append unzstd", decode: func(frame []byte, maxBodySize int) error {
+			_, err := AppendUnzstdBytesWithLimit(nil, frame, maxBodySize)
 			return err
 		}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			if err := testCase.decode(); !errors.Is(err, ErrBodyTooLarge) {
+			if err := testCase.decode(maliciousWindowFrame, 1); !errors.Is(err, ErrBodyTooLarge) {
 				t.Fatalf("unexpected error: %v", err)
+			}
+			if err := testCase.decode(oneGiBWindowFrame, 1<<30); !errors.Is(err, ErrBodyTooLarge) {
+				t.Fatalf("unexpected error for a window over the decoder's own limit: %v", err)
 			}
 		})
 	}
