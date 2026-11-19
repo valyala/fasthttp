@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"testing"
 	"time"
 )
@@ -259,7 +260,7 @@ func TestAppendUncompressBytesWithLimit(t *testing.T) {
 
 			// Without a limit, or with one that isn't reached, the data is
 			// appended to dst whole.
-			for _, maxBodySize := range []int{0, -1, len(data), len(data) + 1, 10 * len(data)} {
+			for _, maxBodySize := range []int{0, -1, len(data), len(data) + 1, 10 * len(data), math.MaxInt - 1, math.MaxInt} {
 				got, err := codec.withLimit(nil, compressed, maxBodySize)
 				if err != nil {
 					t.Fatalf("unexpected error with the limit %d: %v", maxBodySize, err)

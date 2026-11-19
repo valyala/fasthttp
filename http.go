@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net"
 	"os"
@@ -3427,9 +3428,17 @@ func copyZeroAllocWithLimit(w io.Writer, r io.Reader, maxBodySize int) (int64, e
 		return copyZeroAlloc(w, r)
 	}
 
+	// One byte more than the limit is let through, to tell a body of exactly
+	// that size from a larger one. The largest limit is left as it is, since
+	// one more would overflow and make every body too large, and no body is
+	// that large.
+	limit := int64(maxBodySize)
+	if limit < math.MaxInt64 {
+		limit++
+	}
 	lr := &io.LimitedReader{
 		R: r,
-		N: int64(maxBodySize) + 1,
+		N: limit,
 	}
 	n, err := copyZeroAlloc(w, lr)
 	if err != nil {

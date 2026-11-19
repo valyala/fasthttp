@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -2440,6 +2441,62 @@ func TestRequestMultipartFormOptionalWhitespace(t *testing.T) {
 
 			if !isMultipartFormData([]byte(contentType)) {
 				t.Fatalf("isMultipartFormData(%q) = false; want true", contentType)
+			}
+		})
+	}
+}
+
+// The reader is let read one byte more than the limit, to tell a body that is
+// the limit long from a longer one. That byte can't be added to the largest
+// limit without overflowing, which made every body too large.
+func TestCopyZeroAllocWithLimit(t *testing.T) {
+	t.Parallel()
+
+	const body = "hello"
+	for _, tc := range []struct {
+		limit int
+		// tooLarge says that the body is over the limit.
+		tooLarge bool
+	}{
+		// No limit.
+		{limit: 0},
+		{limit: -1},
+		// A limit that the body doesn't exceed.
+		{limit: len(body)},
+		{limit: len(body) + 1},
+		{limit: math.MaxInt32},
+		{limit: math.MaxInt - 1},
+		{limit: math.MaxInt},
+		// A limit that it does.
+		{limit: 1, tooLarge: true},
+		{limit: len(body) - 1, tooLarge: true},
+	} {
+		t.Run(strconv.Itoa(tc.limit), func(t *testing.T) {
+			t.Parallel()
+
+			var dst bytes.Buffer
+			n, err := copyZeroAllocWithLimit(&dst, strings.NewReader(body), tc.limit)
+			if tc.tooLarge {
+				if !errors.Is(err, ErrBodyTooLarge) {
+					t.Fatalf("unexpected error %v. Expecting %v", err, ErrBodyTooLarge)
+				}
+				// Not more than one byte over the limit is read.
+				if n != int64(tc.limit)+1 {
+					t.Fatalf("unexpected number of bytes %d. Expecting %d", n, tc.limit+1)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if n != int64(len(body)) || dst.String() != body {
+				t.Fatalf("unexpected copy %q of %d bytes. Expecting %q", dst.Bytes(), n, body)
+			}
+
+			// An empty body is no more than any limit.
+			dst.Reset()
+			if n, err = copyZeroAllocWithLimit(&dst, strings.NewReader(""), tc.limit); err != nil || n != 0 {
+				t.Fatalf("unexpected result for an empty body: %d bytes and error %v", n, err)
 			}
 		})
 	}
