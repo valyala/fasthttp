@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -239,15 +240,40 @@ func TestWriteUnzstdWithLimitDecoderMemory(t *testing.T) {
 
 	// The zstd decoder has its own 512 MiB window limit, which a cap above it
 	// doesn't raise: a 1 GiB window is rejected with a 1 GiB cap, before
-	// anything is allocated for it.
+	// anything is allocated for it. The window of a frame without a window
+	// descriptor, a single segment, is its content size, and is limited the same.
 	oneGiBWindowFrame := zstdRawFrame(0xa0, []byte{'x'})
-	dst.Reset()
-	n, err = writeUnzstd(&dst, oneGiBWindowFrame, 1<<30)
-	if !errors.Is(err, ErrBodyTooLarge) {
-		t.Fatalf("unexpected error for a window over the decoder's own limit: %v", err)
+	oneGiBSegmentFrame := zstdSingleSegmentFrame(1<<30, []byte{'x'})
+	for _, frame := range [][]byte{oneGiBWindowFrame, oneGiBSegmentFrame} {
+		dst.Reset()
+		n, err = writeUnzstd(&dst, frame, 1<<30)
+		if !errors.Is(err, ErrBodyTooLarge) {
+			t.Fatalf("unexpected error for a window over the decoder's own limit: %v", err)
+		}
+		if n != 0 || dst.Len() != 0 {
+			t.Fatalf("unexpected result for a window over the decoder's own limit: n=%d output=%q", n, dst.Bytes())
+		}
 	}
-	if n != 0 || dst.Len() != 0 {
-		t.Fatalf("unexpected result for a window over the decoder's own limit: n=%d output=%q", n, dst.Bytes())
+
+	// Without a limit the decoder's own limit still applies, and its error is
+	// returned, which is no ErrBodyTooLarge: there is no limit to be over.
+	for _, maxBodySize := range []int{0, -1} {
+		for _, tc := range []struct {
+			frame []byte
+			want  error
+		}{
+			{oneGiBWindowFrame, zstd.ErrWindowSizeExceeded},
+			{oneGiBSegmentFrame, zstd.ErrDecoderSizeExceeded},
+		} {
+			dst.Reset()
+			n, err = writeUnzstd(&dst, tc.frame, maxBodySize)
+			if !errors.Is(err, tc.want) || errors.Is(err, ErrBodyTooLarge) {
+				t.Fatalf("maxBodySize=%d: unexpected error for a window over the decoder's own limit: %v. Expecting %v", maxBodySize, err, tc.want)
+			}
+			if n != 0 || dst.Len() != 0 {
+				t.Fatalf("maxBodySize=%d: unexpected result for a window over the decoder's own limit: n=%d output=%q", maxBodySize, n, dst.Bytes())
+			}
+		}
 	}
 
 	maliciousWindowFrame := zstdRawFrame(0x98, []byte("AA"))
@@ -290,8 +316,20 @@ func TestWriteUnzstdWithLimitDecoderMemory(t *testing.T) {
 			if err := testCase.decode(maliciousWindowFrame, 1); !errors.Is(err, ErrBodyTooLarge) {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if err := testCase.decode(oneGiBWindowFrame, 1<<30); !errors.Is(err, ErrBodyTooLarge) {
-				t.Fatalf("unexpected error for a window over the decoder's own limit: %v", err)
+			for _, frame := range [][]byte{oneGiBWindowFrame, oneGiBSegmentFrame} {
+				if err := testCase.decode(frame, 1<<30); !errors.Is(err, ErrBodyTooLarge) {
+					t.Fatalf("unexpected error for a window over the decoder's own limit: %v", err)
+				}
+			}
+			for _, maxBodySize := range []int{0, -1} {
+				err := testCase.decode(oneGiBWindowFrame, maxBodySize)
+				if !errors.Is(err, zstd.ErrWindowSizeExceeded) || errors.Is(err, ErrBodyTooLarge) {
+					t.Fatalf("maxBodySize=%d: unexpected error for a window over the decoder's own limit: %v", maxBodySize, err)
+				}
+				err = testCase.decode(oneGiBSegmentFrame, maxBodySize)
+				if !errors.Is(err, zstd.ErrDecoderSizeExceeded) || errors.Is(err, ErrBodyTooLarge) {
+					t.Fatalf("maxBodySize=%d: unexpected error for a single segment over the decoder's own limit: %v", maxBodySize, err)
+				}
 			}
 		})
 	}
@@ -384,6 +422,16 @@ func zstdRawFrame(windowDescriptor byte, payload []byte) []byte {
 		windowDescriptor,
 		byte(blockHeader), byte(blockHeader >> 8), byte(blockHeader >> 16),
 	}, payload...)
+}
+
+// zstdSingleSegmentFrame is a frame without a window descriptor, which has a
+// window of the size of its content, contentSize, and a raw block of payload.
+func zstdSingleSegmentFrame(contentSize uint64, payload []byte) []byte {
+	blockHeader := uint32(len(payload)<<3 | 1)
+	frame := []byte{0x28, 0xb5, 0x2f, 0xfd, 0xe0}
+	frame = binary.LittleEndian.AppendUint64(frame, contentSize)
+	frame = append(frame, byte(blockHeader), byte(blockHeader>>8), byte(blockHeader>>16))
+	return append(frame, payload...)
 }
 
 func BenchmarkWriteUnzstdPresized(b *testing.B) {
