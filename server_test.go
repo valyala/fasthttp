@@ -4462,6 +4462,44 @@ func TestCompressHandlerKeepsAdditionalVaryLines(t *testing.T) {
 	}
 }
 
+func TestCompressHandlerVaryTrailer(t *testing.T) {
+	t.Parallel()
+
+	h := CompressHandler(func(ctx *RequestCtx) {
+		if err := ctx.Response.Header.SetTrailer("Vary"); err != nil {
+			t.Error(err)
+		}
+		ctx.Response.Header.Set("Vary", "Origin")
+		ctx.SetBodyStreamWriter(func(w *bufio.Writer) {
+			fmt.Fprint(w, strings.Repeat("private ", 100))
+		})
+	})
+
+	var ctx RequestCtx
+	ctx.Request.Header.Set("Accept-Encoding", "gzip")
+	h(&ctx)
+
+	var buf bytes.Buffer
+	bw := bufio.NewWriter(&buf)
+	if err := ctx.Response.Write(bw); err != nil {
+		t.Fatal(err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+
+	var resp Response
+	if err := resp.Read(bufio.NewReader(&buf)); err != nil {
+		t.Fatal(err)
+	}
+	if ce := string(resp.Header.ContentEncoding()); ce != "gzip" {
+		t.Fatalf("expected gzip, got %q", ce)
+	}
+	if got := string(resp.Header.TrailerHeader()); got != "Vary: Origin,Accept-Encoding\r\n\r\n" {
+		t.Fatalf("unexpected trailer %q", got)
+	}
+}
+
 func TestRequestCtxWriteString(t *testing.T) {
 	t.Parallel()
 
