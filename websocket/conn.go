@@ -182,14 +182,19 @@ func unwrapHijacked(nc net.Conn) net.Conn {
 	return nc
 }
 
+// unwrapServer returns the connection under the wrapper the server puts
+// around nc for Server.MaxConnsPerIP or Server.ProxyProtocol, if it has.
+func unwrapServer(nc net.Conn) (net.Conn, bool) {
+	if w, ok := nc.(interface{ WrappedConn() net.Conn }); ok {
+		return w.WrappedConn(), true
+	}
+	return nc, false
+}
+
 // vectorWriter returns the TCP or Unix socket under nc, whose writev sends a
 // header and payload at once, or nil.
 func vectorWriter(nc net.Conn) net.Conn {
-	raw := unwrapHijacked(nc)
-	// With Server.ProxyProtocol the socket is under one wrapper more.
-	if pc, ok := raw.(interface{ ProxyProtocolConn() net.Conn }); ok {
-		raw = pc.ProxyProtocolConn()
-	}
+	raw, _ := unwrapServer(unwrapHijacked(nc))
 	switch raw.(type) {
 	case *net.TCPConn, *net.UnixConn:
 		return raw
@@ -243,10 +248,16 @@ func (c *Conn) closeWith(err error) {
 // closeTransport closes the socket under a TLS connection before nc itself, so
 // close_notify cannot stall on a peer that no longer reads.
 func closeTransport(nc net.Conn) {
-	if tc, ok := unwrapHijacked(nc).(interface{ NetConn() net.Conn }); ok {
+	wrapper := unwrapHijacked(nc)
+	raw, wrapped := unwrapServer(wrapper)
+	if tc, ok := raw.(interface{ NetConn() net.Conn }); ok {
 		_ = tc.NetConn().Close()
 	}
 	_ = nc.Close()
+	// Closing the server's wrapper releases the per-IP place it may hold.
+	if wrapped {
+		_ = wrapper.Close()
+	}
 }
 
 // shutdown closes the connection and waits until no goroutine of this package

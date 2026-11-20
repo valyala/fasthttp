@@ -257,9 +257,9 @@ func (c *proxyTLSConn) NetConn() net.Conn {
 	return c.Conn.(netConner).NetConn() //nolint:forcetypeassert
 }
 
-// ProxyProtocolConn returns the connection under the wrapper, where the
-// websocket package looks for the socket.
-func (c *proxyConn) ProxyProtocolConn() net.Conn {
+// WrappedConn returns the connection the wrapper is around, as perIPConn's
+// does.
+func (c *proxyConn) WrappedConn() net.Conn {
 	return c.Conn
 }
 
