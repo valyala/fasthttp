@@ -537,6 +537,13 @@ func contextErr(ctx context.Context) error {
 // If ctx is cancelled or expires during dial, reading, or writing, the
 // operation is aborted and ctx.Err() is returned.
 //
+// Context cancellation during dialing requires DialContext (which the default
+// dialer implements). Legacy Dial and DialTimeout callbacks do not accept a context
+// and cannot be interrupted; DoContext will wait for a blocked legacy dial callback
+// to return before returning ctx.Err(). Callers requiring cancellation during dial
+// should configure DialContext. Custom Transport implementations must also cooperate
+// to support context cancellation.
+//
 // For streamed request bodies (such as those provided via Request.SetBodyStream),
 // context cancellation closes the underlying network connection. However, if the
 // client is blocked waiting for the upload stream's reader to produce bytes (e.g.
@@ -1768,6 +1775,13 @@ func (c *HostClient) DoDeadline(req *Request, resp *Response, deadline time.Time
 // If ctx is cancelled or expires during dial, reading, or writing, the
 // operation is aborted and ctx.Err() is returned.
 //
+// Context cancellation during dialing requires DialContext (which the default
+// dialer implements). Legacy Dial and DialTimeout callbacks do not accept a context
+// and cannot be interrupted; DoContext will wait for a blocked legacy dial callback
+// to return before returning ctx.Err(). Callers requiring cancellation during dial
+// should configure DialContext. Custom Transport implementations must also cooperate
+// to support context cancellation.
+//
 // For streamed request bodies (such as those provided via Request.SetBodyStream),
 // context cancellation closes the underlying network connection. However, if the
 // client is blocked waiting for the upload stream's reader to produce bytes (e.g.
@@ -2744,13 +2758,6 @@ func tlsClientHandshake(
 	if handshakeCtx == nil {
 		handshakeCtx = context.Background()
 	}
-	if !deadline.IsZero() {
-		if dl, ok := handshakeCtx.Deadline(); !ok || deadline.Before(dl) {
-			var cancel context.CancelFunc
-			handshakeCtx, cancel = context.WithDeadline(handshakeCtx, deadline)
-			defer cancel()
-		}
-	}
 	err := conn.HandshakeContext(handshakeCtx)
 	if ctxErr := contextErr(ctx); ctxErr != nil {
 		return nil, ctxErr
@@ -2790,16 +2797,17 @@ func dialAddrContext(
 ) (net.Conn, error) {
 	start := time.Now()
 	conn, err := callDialFunc(ctx, addr, dial, dialWithTimeout, dialContext, dialDualStack, isTLS, dialTimeout)
+	if ctxErr := contextErr(ctx); ctxErr != nil {
+		if conn != nil {
+			_ = conn.Close()
+		}
+		return nil, ctxErr
+	}
 	if err != nil {
 		return nil, err
 	}
 	if conn == nil {
 		return nil, errors.New("dialling unsuccessful: please report this bug")
-	}
-
-	if ctxErr := contextErr(ctx); ctxErr != nil {
-		_ = conn.Close()
-		return nil, ctxErr
 	}
 
 	// We assume that any conn that has the Handshake() method is a TLS conn already.

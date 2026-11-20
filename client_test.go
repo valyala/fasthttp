@@ -9471,3 +9471,112 @@ func TestClientDoTimeout_TLSHandshakeTimeout_ReturnsErrTimeout(t *testing.T) {
 		t.Fatalf("expected ErrTimeout for Client.DoTimeout, got %v (%T)", err2, err2)
 	}
 }
+
+func TestClientDoContext_BlockedLegacyDialWaitsForReturn(t *testing.T) {
+	t.Parallel()
+
+	dialEntered := make(chan struct{})
+	unblockDial := make(chan struct{})
+
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			close(dialEntered)
+			<-unblockDial
+			return nil, errors.New("legacy dial failed")
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	req := AcquireRequest()
+	resp := AcquireResponse()
+	defer ReleaseRequest(req)
+	defer ReleaseResponse(resp)
+	req.SetRequestURI("http://example.com/blocked-legacy-dial")
+
+	go func() {
+		errCh <- c.DoContext(ctx, req, resp)
+	}()
+
+	select {
+	case <-dialEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for legacy Dial callback to be invoked")
+	}
+
+	cancel()
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("DoContext returned before legacy Dial returned: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(unblockDial)
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled after legacy Dial unblocked, got: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for DoContext to return after Dial unblocked")
+	}
+}
+
+func TestHostClientDoContext_BlockedLegacyDialTimeoutWaitsForReturn(t *testing.T) {
+	t.Parallel()
+
+	dialEntered := make(chan struct{})
+	unblockDial := make(chan struct{})
+
+	c := &HostClient{
+		Addr: "example.com:80",
+		DialTimeout: func(addr string, timeout time.Duration) (net.Conn, error) {
+			close(dialEntered)
+			<-unblockDial
+			return nil, errors.New("legacy dial timeout failed")
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	req := AcquireRequest()
+	resp := AcquireResponse()
+	defer ReleaseRequest(req)
+	defer ReleaseResponse(resp)
+	req.SetRequestURI("http://example.com/blocked-legacy-dialtimeout")
+
+	go func() {
+		errCh <- c.DoContext(ctx, req, resp)
+	}()
+
+	select {
+	case <-dialEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for legacy DialTimeout callback to be invoked")
+	}
+
+	cancel()
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("DoContext returned before legacy DialTimeout returned: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(unblockDial)
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled after legacy DialTimeout unblocked, got: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for DoContext to return after DialTimeout unblocked")
+	}
+}
