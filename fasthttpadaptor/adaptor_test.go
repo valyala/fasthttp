@@ -2187,6 +2187,47 @@ func TestResponseControllerDeadlinesAfterReleaseWriter(t *testing.T) {
 	}
 }
 
+// contentTypeValues serves h through the adaptor and through net/http and
+// returns the Content-Type fields each of them sent.
+func contentTypeValues(t *testing.T, h http.HandlerFunc) (adaptor, std []string) {
+	t.Helper()
+
+	get := func(c net.Conn) []string {
+		defer c.Close()
+		if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil || len(body) == 0 {
+			t.Fatalf("body %q, %v", body, err)
+		}
+		return resp.Header.Values("Content-Type")
+	}
+
+	s := &fasthttp.Server{Handler: NewFastHTTPHandlerFunc(h)}
+	ln := fasthttputil.NewInmemoryListener()
+	defer ln.Close()
+	go s.Serve(ln) //nolint:errcheck
+	c, err := ln.Dial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	adaptor = get(c)
+
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	c, err = net.Dial("tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return adaptor, get(c)
+}
+
 // A handler turns the Content-Type header off by setting it to nil, as the
 // http.ResponseWriter docs describe and http.ServeContent honors; net/http
 // then sends none. The adaptor must not send fasthttp's default in its place.
@@ -2196,49 +2237,77 @@ func TestHandlerNilContentTypeSendsNone(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		h    http.HandlerFunc
+		std  []string // what net/http sends, where the adaptor differs
 	}{
-		{"buffered", func(w http.ResponseWriter, _ *http.Request) {
+		{name: "buffered", h: func(w http.ResponseWriter, _ *http.Request) {
 			w.Header()["Content-Type"] = nil
 			_, _ = w.Write([]byte("<html>"))
 		}},
-		{"flushed", func(w http.ResponseWriter, _ *http.Request) {
+		{name: "flushed", h: func(w http.ResponseWriter, _ *http.Request) {
 			w.Header()["Content-Type"] = nil
 			_, _ = w.Write([]byte("<html>"))
 			w.(http.Flusher).Flush() //nolint:forcetypeassert
 		}},
-		{"empty value", func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "")
-			_, _ = w.Write([]byte("<html>"))
-		}},
-		{"ServeContent", func(w http.ResponseWriter, r *http.Request) {
+		{name: "ServeContent", h: func(w http.ResponseWriter, r *http.Request) {
 			w.Header()["Content-Type"] = nil
 			http.ServeContent(w, r, "f.txt", time.Unix(0, 0), strings.NewReader("0123456789"))
 		}},
+		// net/http sends an explicitly empty value as one empty field.
+		// fasthttp cannot write an empty Content-Type, so the adaptor sends
+		// none.
+		{name: "empty value", h: func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "")
+			_, _ = w.Write([]byte("<html>"))
+		}, std: []string{""}},
 	} {
-		s := &fasthttp.Server{Handler: NewFastHTTPHandlerFunc(tc.h)}
-		ln := fasthttputil.NewInmemoryListener()
-		go s.Serve(ln) //nolint:errcheck
+		adaptor, std := contentTypeValues(t, tc.h)
+		if len(adaptor) != 0 {
+			t.Errorf("%s: Content-Type = %q, want none", tc.name, adaptor)
+		}
+		if !slices.Equal(std, tc.std) {
+			t.Errorf("%s: net/http sent Content-Type %q, want %q", tc.name, std, tc.std)
+		}
+	}
+}
 
-		c, err := ln.Dial()
-		if err != nil {
-			t.Fatal(err)
+// net/http commits the header at WriteHeader or the first Write. A
+// Content-Type set to nil after that is too late to turn the header off: the
+// type is still sniffed from the body.
+func TestHandlerLateNilContentTypeIsIgnored(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		h    http.HandlerFunc
+	}{
+		{"WriteHeader", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Header()["Content-Type"] = nil
+			_, _ = w.Write([]byte("<html>"))
+		}},
+		{"WriteHeader, flushed", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Header()["Content-Type"] = nil
+			_, _ = w.Write([]byte("<html>"))
+			w.(http.Flusher).Flush() //nolint:forcetypeassert
+		}},
+		{"Write", func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("<html>"))
+			w.Header()["Content-Type"] = nil
+		}},
+		{"Write, flushed", func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("<html>"))
+			w.Header()["Content-Type"] = nil
+			w.(http.Flusher).Flush() //nolint:forcetypeassert
+		}},
+	} {
+		want := []string{"text/html; charset=utf-8"}
+		adaptor, std := contentTypeValues(t, tc.h)
+		if !slices.Equal(adaptor, want) {
+			t.Errorf("%s: Content-Type = %q, want %q", tc.name, adaptor, want)
 		}
-		if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
-			t.Fatal(err)
+		if !slices.Equal(std, want) {
+			t.Errorf("%s: net/http sent Content-Type %q, want %q", tc.name, std, want)
 		}
-		resp, err := http.ReadResponse(bufio.NewReader(c), nil)
-		if err != nil {
-			t.Fatalf("%s: %v", tc.name, err)
-		}
-		body, err := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if err != nil || len(body) == 0 {
-			t.Fatalf("%s: body %q, %v", tc.name, body, err)
-		}
-		if ct := resp.Header.Get("Content-Type"); ct != "" {
-			t.Errorf("%s: Content-Type = %q, want none, as net/http sends", tc.name, ct)
-		}
-		_ = c.Close()
-		_ = ln.Close()
 	}
 }
