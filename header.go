@@ -231,7 +231,8 @@ func (h *ResponseHeader) ConnectionUpgrade() bool {
 
 // ConnectionUpgrade returns true if 'Connection: Upgrade' header is set.
 func (h *RequestHeader) ConnectionUpgrade() bool {
-	return !h.ConnectionClose() && hasConnectionValue(h.h, strUpgrade)
+	// With DisableSpecialHeader 'close' stays in h.h and doesn't set the close flag.
+	return !h.ConnectionClose() && !hasConnectionValue(h.h, strClose) && hasConnectionValue(h.h, strUpgrade)
 }
 
 // PeekCookie is able to returns cookie by a given key from response.
@@ -3872,7 +3873,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	if h.contentLength < 0 {
 		h.contentLengthBytes = h.contentLengthBytes[:0]
 	}
-	if h.contentLength == -2 && !h.ConnectionUpgrade() && !h.mustSkipContentLength() {
+	if h.contentLength == -2 && !h.mustSkipContentLength() {
 		// According to modern HTTP/1.1 specifications (RFC 7230):
 		// `identity` as a value for `Transfer-Encoding` was removed
 		// in the errata to RFC 2616.

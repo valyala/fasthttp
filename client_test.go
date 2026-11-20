@@ -126,6 +126,60 @@ func TestClientConnectionCounts(t *testing.T) {
 	}
 }
 
+func TestHostClientConnectionUpgradeEOFBodyNotReused(t *testing.T) {
+	t.Parallel()
+
+	for _, stream := range []bool{false, true} {
+		ln := fasthttputil.NewInmemoryListener()
+		go func() {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			var req Request
+			if err := req.Read(bufio.NewReader(conn)); err != nil {
+				t.Error(err)
+				return
+			}
+			// No Content-Length and not chunked: the body ends at EOF.
+			wire := "HTTP/1.1 200 OK\r\nConnection: keep-alive\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\nfoobar"
+			_, _ = conn.Write([]byte(wire))
+		}()
+
+		c := &HostClient{
+			Addr:               "example.com",
+			Dial:               func(string) (net.Conn, error) { return ln.Dial() },
+			StreamResponseBody: stream,
+		}
+		var req Request
+		var resp Response
+		req.SetRequestURI("http://example.com/")
+		if err := c.Do(&req, &resp); err != nil {
+			t.Fatalf("stream=%v: %v", stream, err)
+		}
+		var body []byte
+		if stream {
+			var err error
+			if body, err = io.ReadAll(resp.BodyStream()); err != nil {
+				t.Fatalf("stream=%v: %v", stream, err)
+			}
+			if err = resp.CloseBodyStream(); err != nil {
+				t.Fatalf("stream=%v: %v", stream, err)
+			}
+		} else {
+			body = resp.Body()
+		}
+		if string(body) != "foobar" {
+			t.Errorf("stream=%v: unexpected body %q. Expecting %q", stream, body, "foobar")
+		}
+		if n := c.IdleConnsCount(); n != 0 {
+			t.Errorf("stream=%v: unexpected idle connection count %d. Expecting %d", stream, n, 0)
+		}
+		ln.Close()
+	}
+}
+
 func TestClientStreamCloseWaitsForRead(t *testing.T) {
 	t.Parallel()
 
