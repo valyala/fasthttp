@@ -2273,7 +2273,9 @@ func TestNewFastHTTPHandlerNoContentTypeSniffWithContentEncoding(t *testing.T) {
 			w.Header().Set("Content-Encoding", "gzip")
 			w.Write(body) //nolint:errcheck
 			if flush {
-				w.(http.Flusher).Flush()
+				if err := http.NewResponseController(w).Flush(); err != nil {
+					t.Errorf("flush failed: %v", err)
+				}
 			}
 		}))
 
@@ -2289,6 +2291,35 @@ func TestNewFastHTTPHandlerNoContentTypeSniffWithContentEncoding(t *testing.T) {
 		}
 		if ce := ctx.Response.Header.ContentEncoding(); string(ce) != "gzip" {
 			t.Fatalf("flush=%v: unexpected Content-Encoding %q, expecting %q", flush, ce, "gzip")
+		}
+	}
+}
+
+func TestNewFastHTTPHandlerContentTypeSniffWithLateContentEncoding(t *testing.T) {
+	t.Parallel()
+
+	for _, flush := range []bool{false, true} {
+		handler := NewFastHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			// Set after the header is committed, so net/http ignores it.
+			w.Header().Set("Content-Encoding", "gzip")
+			w.Write([]byte("hello")) //nolint:errcheck
+			if flush {
+				if err := http.NewResponseController(w).Flush(); err != nil {
+					t.Errorf("flush failed: %v", err)
+				}
+			}
+		}))
+
+		var ctx fasthttp.RequestCtx
+		var req fasthttp.Request
+		req.SetRequestURI("http://example.com/")
+		ctx.Init(&req, nil, nil)
+		handler(&ctx)
+
+		// The body is still sniffed, as the header was committed without a Content-Encoding.
+		if ct := ctx.Response.Header.ContentType(); string(ct) != "text/plain; charset=utf-8" {
+			t.Errorf("flush=%v: unexpected Content-Type %q, expecting %q", flush, ct, "text/plain; charset=utf-8")
 		}
 	}
 }
