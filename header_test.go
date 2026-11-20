@@ -1656,6 +1656,20 @@ func TestHeaderConnectionUpgradeRepeatedField(t *testing.T) {
 	}
 }
 
+func TestRequestHeaderConnectionUpgradeCloseDisableSpecialHeader(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	h.DisableSpecialHeader()
+	wire := "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"
+	if err := h.Read(bufio.NewReader(strings.NewReader(wire))); err != nil {
+		t.Fatal(err)
+	}
+	if h.ConnectionUpgrade() {
+		t.Error("RequestHeader.ConnectionUpgrade() = true, want false")
+	}
+}
+
 func TestRequestHeaderConnectionUpgrade(t *testing.T) {
 	t.Parallel()
 
