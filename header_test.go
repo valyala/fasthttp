@@ -6331,7 +6331,8 @@ func TestResponseHeaderTransferEncodingOnWire(t *testing.T) {
 // a fault in the framing of the message, a 400 (RFC 9112, sections 6.1 and 6.3).
 // A request needs chunked as the final coding, a response without it ends with
 // the connection. A 1xx or 204 response must not have the field at all, so no
-// value is an unknown coding in one.
+// value is an unknown coding in one, and a 2xx response to CONNECT is a tunnel
+// whose field is ignored, so no value is an error in one.
 func TestHeaderReadTransferEncodingKinds(t *testing.T) {
 	t.Parallel()
 
@@ -6459,6 +6460,10 @@ func TestHeaderReadTransferEncodingKinds(t *testing.T) {
 		// coding it names, so that no value is an unknown coding in it: each is
 		// the fault it was before.
 		forbidden bool
+		// connect says that the response answers a CONNECT request, and ignored
+		// that the field is ignored in it, so that no value is an error: the
+		// response is a 2xx one, and ends at its header (RFC 9112, section 6.3).
+		connect, ignored bool
 	}{
 		{name: "request"},
 		{name: "response", status: StatusOK},
@@ -6473,6 +6478,16 @@ func TestHeaderReadTransferEncodingKinds(t *testing.T) {
 		{name: "304 response", status: StatusNotModified},
 		{name: "203 response", status: StatusNonAuthoritativeInfo},
 		{name: "205 response", status: StatusResetContent},
+		// A 2xx response to CONNECT establishes a tunnel, and a client ignores the
+		// field in it, whatever it says. Any other response to CONNECT is read as
+		// a response to another request.
+		{name: "200 response to CONNECT", status: StatusOK, connect: true, ignored: true},
+		{name: "204 response to CONNECT", status: StatusNoContent, connect: true, ignored: true},
+		{name: "299 response to CONNECT", status: 299, connect: true, ignored: true},
+		{name: "407 response to CONNECT", status: StatusProxyAuthRequired, connect: true},
+		{name: "300 response to CONNECT", status: StatusMultipleChoices, connect: true},
+		{name: "199 response to CONNECT", status: 199, connect: true, forbidden: true},
+		{name: "304 response to CONNECT", status: StatusNotModified, connect: true},
 	}
 	for _, tt := range tests {
 		for _, message := range messages {
@@ -6490,8 +6505,21 @@ func TestHeaderReadTransferEncodingKinds(t *testing.T) {
 					} else {
 						var h ResponseHeader
 						h.secureErrorLogMessage = secure
+						h.connectResponse = message.connect
 						_, err = h.parse(fmt.Appendf(nil, "HTTP/1.1 %d %s\r\nTransfer-Encoding: %s\r\n\r\n",
 							message.status, StatusMessage(message.status), tt.value))
+						if message.ignored {
+							if err != nil {
+								t.Fatalf("unexpected error %q: the field is to be ignored", err)
+							}
+							if got := h.Peek(HeaderTransferEncoding); len(got) != 0 {
+								t.Fatalf("the ignored field is kept as %q", got)
+							}
+							if got := h.ContentLength(); got != -2 {
+								t.Fatalf("the ignored field has a say in the length of the body: %d", got)
+							}
+							return
+						}
 					}
 					if err == nil {
 						t.Fatal("expecting an error")

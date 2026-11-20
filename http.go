@@ -1918,8 +1918,9 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 func (resp *Response) readLimitBody(r *bufio.Reader, maxBodySize int, head, connect bool) error {
 	resp.headResponse = head
 	resp.connectResponse = connect
+	resp.Header.connectResponse = connect
 	resp.resetSkipHeader()
-	err := resp.Header.Read(r)
+	err := resp.Header.read(r)
 	if err != nil {
 		return err
 	}
@@ -1933,7 +1934,7 @@ func (resp *Response) readLimitBody(r *bufio.Reader, maxBodySize int, head, conn
 		if n >= maxInterimResponses {
 			return errTooManyInterimResponses
 		}
-		if err = resp.Header.Read(r); err != nil {
+		if err = resp.Header.read(r); err != nil {
 			return err
 		}
 	}

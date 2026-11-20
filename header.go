@@ -91,6 +91,10 @@ type ResponseHeader struct {
 	noDefaultDate bool
 	// serverSet tells an empty Server value from none.
 	serverSet bool
+
+	// connectResponse is set by Response.readLimitBody when the response
+	// answers a CONNECT request, which Read doesn't know.
+	connectResponse bool
 }
 
 // RequestHeader represents HTTP request header.
@@ -331,6 +335,15 @@ func (h *ResponseHeader) mustSkipBody() bool {
 func (h *ResponseHeader) mustSkipContentLengthOnWire() bool {
 	statusCode := h.StatusCode()
 	return statusCode < 200 || statusCode == StatusNoContent
+}
+
+// connectTunnel reports whether the response is a 2xx response to CONNECT, see
+// connectResponse. The connection becomes a tunnel after its header, and a
+// client ignores the Transfer-Encoding fields of such a response whatever they
+// say (RFC 9112, section 6.3).
+func (h *ResponseHeader) connectTunnel() bool {
+	statusCode := h.StatusCode()
+	return h.connectResponse && statusCode >= 200 && statusCode < 300
 }
 
 // SetContentLength sets Content-Length header value.
@@ -842,6 +855,13 @@ var (
 // fasthttp doesn't read is reported as before too. A 304 response may have the
 // field, to describe the selected representation, so an unknown coding in it
 // is one.
+//
+// A 2xx response to CONNECT is no error at all: the connection becomes a tunnel
+// after its header, and a client ignores the Transfer-Encoding of such a
+// response (RFC 9112, section 6.3), so the field is ignored. HostClient and
+// PipelineClient know that a response answers a CONNECT request.
+// ResponseHeader.Read and Response.ReadLimitBody don't, and read the response
+// as any other.
 //
 // It matches ErrUnsupportedTransferEncoding too, which is what an unknown
 // coding was reported as with Server.SecureErrorLogMessage.
@@ -1722,6 +1742,7 @@ func (h *ResponseHeader) Reset() {
 	h.disableNormalizing = false
 	h.SetNoDefaultContentType(false)
 	h.noDefaultDate = false
+	h.connectResponse = false
 	h.resetSkipNormalize()
 }
 
@@ -3043,6 +3064,13 @@ func (h *ResponseHeader) Cookie(cookie *Cookie) bool {
 //
 // io.EOF is returned if r is closed before reading the first header byte.
 func (h *ResponseHeader) Read(r *bufio.Reader) error {
+	// Read doesn't know the request that the response answers.
+	h.connectResponse = false
+	return h.read(r)
+}
+
+// read is Read for a response whose request may be known, see connectResponse.
+func (h *ResponseHeader) read(r *bufio.Reader) error {
 	n := 1
 	h.terminatorSearched = 0
 	for {
@@ -4122,7 +4150,10 @@ func (h *ResponseHeader) parseHeaderFields(buf []byte, unknownCoding *deferredCo
 			}
 		case 't':
 			if caseInsensitiveCompare(s.key, strTransferEncoding) {
-				if h.noHTTP11 {
+				// The field is ignored in an HTTP/1.0 response, and in a 2xx
+				// response to CONNECT, which ends at its header: it is no
+				// transfer coding to read there, known or not.
+				if h.noHTTP11 || h.connectTunnel() {
 					continue
 				}
 				if transferEncodingSeen {
