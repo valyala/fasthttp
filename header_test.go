@@ -4587,6 +4587,22 @@ func TestResponseHeaderPeekAll(t *testing.T) {
 	expectResponseHeaderAll(t, h, HeaderTrailer, [][]byte{s2b("Foo")})
 }
 
+func TestResponseHeaderPeekAllSetCookie(t *testing.T) {
+	t.Parallel()
+
+	var h ResponseHeader
+	h.Add(HeaderSetCookie, "a=1; Path=/")
+	h.Add(HeaderSetCookie, "b=2; HttpOnly")
+	expectResponseHeaderAll(t, &h, HeaderSetCookie, [][]byte{s2b("a=1; Path=/"), s2b("b=2; HttpOnly")})
+
+	var parsed ResponseHeader
+	br := bufio.NewReader(bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nSet-Cookie: a=1; Path=/\r\nSet-Cookie: b=2; HttpOnly\r\n\r\n"))
+	if err := parsed.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expectResponseHeaderAll(t, &parsed, HeaderSetCookie, [][]byte{s2b("a=1; Path=/"), s2b("b=2; HttpOnly")})
+}
+
 func TestResponseHeaderPeekCanonical(t *testing.T) {
 	t.Parallel()
 

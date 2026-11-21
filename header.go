@@ -2701,8 +2701,10 @@ func (h *ResponseHeader) peekAll(key []byte) [][]byte {
 			h.mulHeader = append(h.mulHeader, h.contentLengthBytes)
 		}
 	case HeaderSetCookie:
-		if len(h.cookies) > 0 {
-			h.mulHeader = append(h.mulHeader, appendResponseCookieBytes(nil, h.cookies))
+		// One value per Set-Cookie line: joined, a cookie reads as an
+		// attribute of the one before it.
+		for i := range h.cookies {
+			h.mulHeader = append(h.mulHeader, h.cookies[i].value)
 		}
 	case HeaderTrailer:
 		if len(h.trailer) > 0 {
