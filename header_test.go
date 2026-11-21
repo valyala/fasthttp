@@ -1276,6 +1276,40 @@ func TestRequestHeaderHTTP10ConnectionKeepAlive(t *testing.T) {
 	}
 }
 
+func TestRequestHeaderHTTP10ConnectionKeepAliveInSecondHeader(t *testing.T) {
+	t.Parallel()
+
+	// The keep-alive option may be in any of the Connection headers.
+	s := "GET / HTTP/1.0\r\nHost: foobar\r\nConnection: upgrade\r\nConnection: keep-alive\r\n\r\n"
+	var h RequestHeader
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if h.ConnectionClose() {
+		t.Fatalf("unexpected 'Connection: close' request header")
+	}
+}
+
+func TestRequestDisableSpecialHeaderHTTP10ConnectionClosePrecedence(t *testing.T) {
+	t.Parallel()
+
+	// With special header processing disabled, an explicit close must still
+	// take precedence over a later keep-alive, since this mode otherwise lets
+	// the second header win.
+	s := "GET / HTTP/1.0\r\nHost: foobar\r\nConnection: close\r\nConnection: keep-alive\r\n\r\n"
+	var h RequestHeader
+	h.DisableSpecialHeader()
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !h.ConnectionClose() {
+		t.Fatal("expected ConnectionClose when an explicit close is set")
+	}
+}
+
 func TestBufferSnippet(t *testing.T) {
 	t.Parallel()
 
@@ -6674,5 +6708,33 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 				}
 			})
 		}
+func TestRequestHeaderDisableSpecialHeaderSetConnectionSyncsCloseFlag(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	h.DisableSpecialHeader()
+	raw := "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n"
+	if err := h.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		t.Fatalf("unexpected error reading header: %v", err)
+	}
+	if !h.ConnectionClose() {
+		t.Fatal("expected ConnectionClose after reading Connection: close")
+	}
+
+	// With special headers disabled the setter must still keep the close flag
+	// and the stored values in sync with the Connection field it writes.
+	h.Set(HeaderConnection, "keep-alive")
+	if h.ConnectionClose() {
+		t.Fatal("ConnectionClose still true after Set(Connection, keep-alive)")
+	}
+	if vals := h.PeekAll(HeaderConnection); len(vals) != 1 || string(vals[0]) != "keep-alive" {
+		t.Fatalf("PeekAll(Connection) = %q, want [keep-alive]", vals)
+	}
+
+	// The reverse direction: replacing with close restores the flag.
+	h.Set(HeaderConnection, "close")
+	if !h.ConnectionClose() {
+		t.Fatal("ConnectionClose false after Set(Connection, close)")
+}
 	}
 }
