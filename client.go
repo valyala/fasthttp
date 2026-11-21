@@ -763,10 +763,10 @@ type DialFuncWithTimeout func(addr string, timeout time.Duration) (net.Conn, err
 // Request argument passed to RetryIfFunc, if there are any request errors.
 type RetryIfFunc func(request *Request) bool
 
-// RetryIfErrFunc defines an interface used for implementing the following functionality:
-// When the client encounters an error during a request, the behavior—whether to retry
-// and whether to reset the request timeout—should be determined
-// based on the return value of this interface.
+// RetryIfErrFunc decides whether to retry a failed request and whether to reset its timeout.
+// The retry loop calls it after a retryable failure while another attempt remains.
+// A request carrying a streaming body uses a single attempt. An eligible retry starts
+// as soon as this function returns, subject to the request timeout.
 //
 // attempt indicates which attempt the current retry is due to a failure of.
 // The first request counts as the first attempt.
