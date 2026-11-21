@@ -2547,6 +2547,13 @@ func AddMissingPort(addr string, isTLS bool) string {
 		return addr
 	}
 
+	// An empty port ("host:", "[::1]:") is a missing one, see RFC 3986, section 3.2.3.
+	// An unbracketed IPv6 address such as "::" has more than one colon and is kept as is.
+	if addrLen > 1 && addr[addrLen-1] == ':' && (addr[addrLen-2] == ']' || strings.IndexByte(addr, ':') == addrLen-1) {
+		addr = addr[:addrLen-1]
+		addrLen--
+	}
+
 	isIP6 := addr[0] == '['
 	if isIP6 {
 		// if the IPv6 has opening bracket but closing bracket is the last char then it doesn't have a port
