@@ -764,13 +764,39 @@ func TestRequestHeaderSetCookieWithSpecialChars(t *testing.T) {
 	}
 }
 
-func TestResponseHeaderDefaultStatusCode(t *testing.T) {
+func TestResponseHeaderStatusCode(t *testing.T) {
 	t.Parallel()
 
 	var h ResponseHeader
-	statusCode := h.StatusCode()
-	if statusCode != StatusOK {
-		t.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
+	if statusCode := h.StatusCode(); statusCode != 0 {
+		t.Fatalf("unexpected status code for unset header: %d. Expecting 0", statusCode)
+	}
+
+	h.SetStatusCode(StatusNotFound)
+	if statusCode := h.StatusCode(); statusCode != StatusNotFound {
+		t.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusNotFound)
+	}
+}
+
+func TestResponseUnsetStatusCodeOnWire(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	resp.SetBodyString("foo")
+
+	var buf bytes.Buffer
+	if _, err := resp.WriteTo(&buf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := buf.String()
+	if !strings.HasPrefix(got, "HTTP/1.1 200 OK\r\n") {
+		t.Fatalf("unexpected status line for unset status code: %q", got)
+	}
+	if !strings.Contains(got, "Content-Length: 3\r\n") {
+		t.Fatalf("missing Content-Length for unset status code: %q", got)
+	}
+	if statusCode := resp.StatusCode(); statusCode != 0 {
+		t.Fatalf("status code changed by serialization: %d. Expecting 0", statusCode)
 	}
 }
 
