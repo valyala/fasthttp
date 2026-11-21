@@ -118,7 +118,6 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 		case modeDone:
 			// Buffered, no Flush() nor Hijack().
 			ctx.SetStatusCode(w.status())
-			haveContentType := false
 			// The framing is the one committed with the header, or the final
 			// header map's when the handler never committed one.
 			f := w.frame
@@ -127,9 +126,13 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			}
 			carry := carriesTrailers(ctx, f)
 			announced := f.announce(ctx, carry)
+			haveContentType := f.suppressContentType(ctx)
 			for k, vv := range w.Header() {
 				if k == fasthttp.HeaderContentType {
-					haveContentType = true
+					if f.noType {
+						continue
+					}
+					haveContentType = !noContentType(vv)
 				}
 				if isTrailerField(k, announced) {
 					continue
@@ -171,20 +174,23 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			// Streaming: send the headers now and hand the body to SetBodyStream.
 			ctx.SetStatusCode(w.status())
 
-			haveContentType := false
 			f := w.frame
 			if !w.committed {
 				f = frameOf(w.Header())
 			}
 			carry := carriesTrailers(ctx, f)
 			announced := f.announce(ctx, carry)
+			haveContentType := f.suppressContentType(ctx)
 			for k, vv := range w.Header() {
 				// No Content-Length when streaming.
 				if k == fasthttp.HeaderContentLength {
 					continue
 				}
 				if k == fasthttp.HeaderContentType {
-					haveContentType = true
+					if f.noType {
+						continue
+					}
+					haveContentType = !noContentType(vv)
 				}
 				if isTrailerField(k, announced) {
 					continue
@@ -229,6 +235,12 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			panic("net/http handler panicked")
 		}
 	}
+}
+
+// noContentType reports whether a Content-Type entry of the handler's header
+// map is nil or empty.
+func noContentType(vv []string) bool {
+	return len(vv) == 0 || vv[0] == ""
 }
 
 // streamBody feeds a flushed response, or a buffered one that carries
@@ -559,8 +571,15 @@ const bufferBeforeChunkingSize = 2048
 // that is no length, which net/http chunks around; prefix is a TrailerPrefix
 // field; trailer is the announcement and values what the announced names
 // held then.
+//
+// noType is a Content-Type set to nil or to an empty value, which is how
+// net/http handlers turn the header off (see http.ResponseWriter.Header and
+// http.ServeContent): no type is sniffed and none is sent. net/http sends an
+// explicitly empty value as one empty Content-Type field; fasthttp cannot
+// write an empty Content-Type, so the adaptor sends none for it too.
 type framing struct {
 	fixed, chunked, prefix bool
+	noType                 bool
 	trailer                []string
 	values                 map[string][]string
 }
@@ -572,6 +591,9 @@ func frameOf(h http.Header) framing {
 		chunked: te != "" && te != "identity",
 		prefix:  hasTrailerPrefix(h),
 		trailer: slices.Clone(h[fasthttp.HeaderTrailer]),
+	}
+	if vv, ok := h[fasthttp.HeaderContentType]; ok {
+		f.noType = noContentType(vv)
 	}
 	if _, ok := h[fasthttp.HeaderContentLength]; ok && !f.fixed && !f.chunked {
 		if n, err := strconv.ParseInt(h.Get(fasthttp.HeaderContentLength), 10, 64); err == nil && n >= 0 {
@@ -592,6 +614,17 @@ func frameOf(h http.Header) framing {
 		}
 	}
 	return f
+}
+
+// suppressContentType keeps the sniffed and fasthttp's default Content-Type
+// off a response whose handler turned the header off before committing it,
+// and reports whether it did. Turning it off later is too late, as in
+// net/http: the entry is skipped and the body is sniffed.
+func (f framing) suppressContentType(ctx *fasthttp.RequestCtx) bool {
+	if f.noType {
+		ctx.Response.Header.SetNoDefaultContentType(true)
+	}
+	return f.noType
 }
 
 // hasTrailerPrefix reports whether h carries a TrailerPrefix field.
