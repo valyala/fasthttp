@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
@@ -785,6 +786,87 @@ func TestRequestBufferedBodyWithTrailerNoFlush(t *testing.T) {
 	}
 	if bw.Buffered() == 0 {
 		t.Fatal("expected the request to be buffered")
+	}
+}
+
+func TestResponseHTTP10UpgradeKeepAliveEOFDelimitedBody(t *testing.T) {
+	t.Parallel()
+
+	// The keep-alive option is in the second Connection header and there is no
+	// Content-Length, so the body is delimited by EOF. The connection is
+	// already closed at that point and cannot be pooled, even if the peer
+	// sent keep-alive.
+	raw := "HTTP/1.0 200 OK\r\n" +
+		"Connection: upgrade\r\n" +
+		"Connection: keep-alive\r\n" +
+		"\r\n" +
+		"body"
+	var resp Response
+	if err := resp.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resp.ConnectionClose() {
+		t.Fatal("expected ConnectionClose for a body delimited by EOF")
+	}
+
+	// The same headers with a Content-Length delimit the body exactly, so the
+	// keep-alive is honored and the connection stays open.
+	rawCL := "HTTP/1.0 200 OK\r\n" +
+		"Connection: upgrade\r\n" +
+		"Connection: keep-alive\r\n" +
+		"Content-Length: 4\r\n" +
+		"\r\n" +
+		"body"
+	var respCL Response
+	if err := respCL.Read(bufio.NewReader(strings.NewReader(rawCL))); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if respCL.ConnectionClose() {
+		t.Fatal("unexpected ConnectionClose when Content-Length delimits the body")
+	}
+}
+
+func TestResponseHTTP10UpgradeKeepAliveEOFDelimitedStreamedBody(t *testing.T) {
+	t.Parallel()
+
+	// With StreamResponseBody the body is exposed before ReadBody reaches the
+	// buffered path. The EOF-delimited response still has to close the
+	// connection, otherwise HostClient pools a connection the peer closed.
+	clientConn, serverConn := net.Pipe()
+	go func() {
+		defer serverConn.Close()
+		buf := make([]byte, 4096)
+		_, _ = serverConn.Read(buf) // request line and headers
+		_, _ = serverConn.Write([]byte("HTTP/1.0 200 OK\r\n" +
+			"Connection: upgrade\r\n" +
+			"Connection: keep-alive\r\n" +
+			"\r\n" +
+			"body"))
+	}()
+
+	hc := &HostClient{
+		Addr:               "example.com:80",
+		Dial:               func(string) (net.Conn, error) { return clientConn, nil },
+		StreamResponseBody: true,
+	}
+	var req Request
+	req.SetRequestURI("http://example.com/")
+	resp := AcquireResponse()
+	defer ReleaseResponse(resp)
+	if err := hc.Do(&req, resp); err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	if !resp.ConnectionClose() {
+		t.Fatal("expected ConnectionClose for an EOF delimited streamed body")
+	}
+	if _, err := io.Copy(io.Discard, resp.BodyStream()); err != nil {
+		t.Fatalf("unexpected stream read error: %v", err)
+	}
+	if err := resp.CloseBodyStream(); err != nil {
+		t.Fatalf("unexpected stream close error: %v", err)
+	}
+	if n := hc.IdleConnsCount(); n != 0 {
+		t.Fatalf("closed connection was pooled: %d idle connections", n)
 	}
 }
 
@@ -6528,4 +6610,50 @@ func TestRequestBodyStreamWarning(t *testing.T) {
 	if out != expectedWarning {
 		t.Fatalf("unexpected log message: got %q, want %q", out, expectedWarning)
 	}
+}
+
+func TestResponseHTTP10UpgradeKeepAliveEOFDelimitedSkippedBody(t *testing.T) {
+	t.Parallel()
+
+	// A caller that sets SkipBody on a GET never reads the EOF-delimited body.
+	// The peer has closed, so HostClient must discard the connection instead of
+	// pooling it. A HEAD response carries no body, so it may still be reused.
+	run := func(method string, wantIdle int) {
+		clientConn, serverConn := net.Pipe()
+		keepOpen := make(chan struct{})
+		go func() {
+			defer serverConn.Close()
+			buf := make([]byte, 4096)
+			_, _ = serverConn.Read(buf) // request line and headers
+			_, _ = serverConn.Write([]byte("HTTP/1.0 200 OK\r\n" +
+				"Connection: upgrade\r\n" +
+				"Connection: keep-alive\r\n" +
+				"\r\n" +
+				"body"))
+			if method == MethodHead {
+				<-keepOpen // leave the connection usable so it can be pooled
+			}
+		}()
+
+		hc := &HostClient{
+			Addr: "example.com:80",
+			Dial: func(string) (net.Conn, error) { return clientConn, nil },
+		}
+		var req Request
+		req.SetRequestURI("http://example.com/")
+		req.Header.SetMethod(method)
+		resp := AcquireResponse()
+		defer ReleaseResponse(resp)
+		resp.SkipBody = true
+		if err := hc.Do(&req, resp); err != nil {
+			t.Fatalf("%s: unexpected request error: %v", method, err)
+		}
+		if n := hc.IdleConnsCount(); n != wantIdle {
+			t.Fatalf("%s: %d idle connections, want %d", method, n, wantIdle)
+		}
+		close(keepOpen)
+	}
+
+	run(MethodGet, 0)
+	run(MethodHead, 1)
 }
