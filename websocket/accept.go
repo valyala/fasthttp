@@ -82,10 +82,12 @@ var (
 // fasthttp skips the upgrade while shutting down with
 // [fasthttp.Server.CloseOnShutdown]. The Server's timeouts and Shutdown do not
 // apply to the upgraded connection; use the options here instead. The
-// connection's TCP or Unix socket is closed with the WebSocket connection. A
-// connection that hides its socket, as with [fasthttp.Server.MaxConnsPerIP]
-// without TLS or a net.Conn of the caller's, is closed by fasthttp when
-// handler returns, or with the WebSocket connection under
+// connection's TCP or Unix socket, or the one under TLS, is closed with the
+// WebSocket connection. So is the wrapper the server has around it for
+// [fasthttp.Server.MaxConnsPerIP] or [fasthttp.Server.ProxyProtocol], which
+// gives the connection's place under MaxConnsPerIP back. A net.Conn without
+// that wrapper that hides its socket is closed by fasthttp when handler
+// returns, or with the WebSocket connection under
 // [fasthttp.Server.KeepHijackedConns].
 func Accept(ctx *fasthttp.RequestCtx, opts *AcceptOptions, handler func(*Conn)) error {
 	if opts == nil {

@@ -78,6 +78,16 @@ func newPerIPConn(conn net.Conn, ip perIPKey, counter *perIPConnCounter) net.Con
 	}
 }
 
+// WrappedConn returns the connection the wrapper is around. The websocket
+// package finds the socket there and closes the wrapper with its connection.
+func (c *perIPConn) WrappedConn() net.Conn {
+	return c.Conn
+}
+
+func (c *perIPTLSConn) WrappedConn() net.Conn {
+	return c.Conn
+}
+
 func (c *perIPConn) Close() error {
 	if c.closed.Swap(true) {
 		return nil
