@@ -4,10 +4,12 @@ package fasthttp
 
 import (
 	"bytes"
+	"crypto/tls"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestAllocationServeConn(t *testing.T) {
@@ -71,6 +73,44 @@ func TestAllocationClient(t *testing.T) {
 
 		ReleaseRequest(req)
 		ReleaseResponse(res)
+	})
+
+	if n != 0 {
+		t.Fatalf("expected 0 allocations, got %f", n)
+	}
+}
+
+func TestAllocationClient_FreshDial(t *testing.T) {
+	rw := &readWriter{}
+	rw.r.Grow(1024)
+	rw.w.Grow(1024)
+
+	c := &HostClient{
+		Addr: "example.com:80",
+		DialTimeout: func(addr string, timeout time.Duration) (net.Conn, error) {
+			rw.r.Reset()
+			rw.w.Reset()
+			rw.r.WriteString("HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\nok")
+			return rw, nil
+		},
+	}
+
+	req := AcquireRequest()
+	res := AcquireResponse()
+	defer ReleaseRequest(req)
+	defer ReleaseResponse(res)
+
+	req.SetRequestURI("http://example.com/")
+	req.Header.SetMethod(MethodGet)
+
+	n := testing.AllocsPerRun(100, func() {
+		req.Reset()
+		res.Reset()
+		req.SetRequestURI("http://example.com/")
+		req.Header.SetMethod(MethodGet)
+		if err := c.DoTimeout(req, res, 100*time.Millisecond); err != nil {
+			t.Fatal(err)
+		}
 	})
 
 	if n != 0 {
@@ -179,5 +219,93 @@ func TestAllocationFSTrimmedSlash(t *testing.T) {
 		if n := testing.AllocsPerRun(100, get); n != 0 {
 			t.Fatalf("%s: expected 0 allocations, got %f", uri, n)
 		}
+	}
+}
+
+func TestAllocationClient_FreshTLSDial_WriteTimeout(t *testing.T) {
+	certData, keyData, err := GenerateTestCertificate("127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := tls.X509KeyPair(certData, keyData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+	}
+
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("cannot listen: %v", err)
+	}
+	defer ln.Close()
+
+	tlsLn := tls.NewListener(ln, tlsConfig)
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(StatusOK)
+			ctx.SetBodyString("Hello, TLS!")
+		},
+	}
+	go s.Serve(tlsLn) //nolint:errcheck
+
+	clientTLSConfig := &tls.Config{
+		InsecureSkipVerify: true,
+	}
+
+	// 1. Measure fresh TLS connection allocations without WriteTimeout (baseline)
+	cNoTimeout := &HostClient{
+		Addr:      ln.Addr().String(),
+		IsTLS:     true,
+		TLSConfig: clientTLSConfig,
+	}
+
+	req := AcquireRequest()
+	res := AcquireResponse()
+	defer ReleaseRequest(req)
+	defer ReleaseResponse(res)
+
+	req.SetRequestURI("https://" + ln.Addr().String() + "/fresh-tls")
+	req.Header.SetConnectionClose()
+
+	if err := cNoTimeout.Do(req, res); err != nil {
+		t.Fatal(err)
+	}
+
+	baseAllocs := testing.AllocsPerRun(20, func() {
+		req.Reset()
+		res.Reset()
+		req.SetRequestURI("https://" + ln.Addr().String() + "/fresh-tls")
+		req.Header.SetConnectionClose()
+		if err := cNoTimeout.Do(req, res); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	// 2. Measure fresh TLS connection allocations with WriteTimeout set
+	cWithTimeout := &HostClient{
+		Addr:         ln.Addr().String(),
+		IsTLS:        true,
+		TLSConfig:    clientTLSConfig,
+		WriteTimeout: 5 * time.Second,
+	}
+
+	if err := cWithTimeout.Do(req, res); err != nil {
+		t.Fatal(err)
+	}
+
+	timeoutAllocs := testing.AllocsPerRun(20, func() {
+		req.Reset()
+		res.Reset()
+		req.SetRequestURI("https://" + ln.Addr().String() + "/fresh-tls")
+		req.Header.SetConnectionClose()
+		if err := cWithTimeout.Do(req, res); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if timeoutAllocs > baseAllocs {
+		t.Fatalf("WriteTimeout added allocations on fresh TLS connection: got %f allocs/op with timeout, baseline was %f allocs/op", timeoutAllocs, baseAllocs)
 	}
 }
