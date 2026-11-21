@@ -1634,6 +1634,42 @@ func testResponseHeaderConnectionUpgrade(t *testing.T, s string, isUpgrade, isKe
 	}
 }
 
+func TestHeaderConnectionUpgradeRepeatedField(t *testing.T) {
+	t.Parallel()
+
+	var req RequestHeader
+	wire := "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: keep-alive\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"
+	if err := req.Read(bufio.NewReader(strings.NewReader(wire))); err != nil {
+		t.Fatal(err)
+	}
+	if !req.ConnectionUpgrade() {
+		t.Error("RequestHeader.ConnectionUpgrade() = false, want true")
+	}
+
+	var resp ResponseHeader
+	wire = "HTTP/1.1 101 Switching Protocols\r\nConnection: keep-alive\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"
+	if err := resp.Read(bufio.NewReader(strings.NewReader(wire))); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.ConnectionUpgrade() {
+		t.Error("ResponseHeader.ConnectionUpgrade() = false, want true")
+	}
+}
+
+func TestRequestHeaderConnectionUpgradeCloseDisableSpecialHeader(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	h.DisableSpecialHeader()
+	wire := "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"
+	if err := h.Read(bufio.NewReader(strings.NewReader(wire))); err != nil {
+		t.Fatal(err)
+	}
+	if h.ConnectionUpgrade() {
+		t.Error("RequestHeader.ConnectionUpgrade() = true, want false")
+	}
+}
+
 func TestRequestHeaderConnectionUpgrade(t *testing.T) {
 	t.Parallel()
 

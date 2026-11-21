@@ -226,12 +226,13 @@ func (h *header) ResetConnectionClose() {
 
 // ConnectionUpgrade returns true if 'Connection: Upgrade' header is set.
 func (h *ResponseHeader) ConnectionUpgrade() bool {
-	return !h.ConnectionClose() && hasHeaderValue(h.Peek(HeaderConnection), strUpgrade)
+	return !h.ConnectionClose() && hasConnectionValue(h.h, strUpgrade)
 }
 
 // ConnectionUpgrade returns true if 'Connection: Upgrade' header is set.
 func (h *RequestHeader) ConnectionUpgrade() bool {
-	return !h.ConnectionClose() && hasHeaderValue(h.Peek(HeaderConnection), strUpgrade)
+	// With DisableSpecialHeader 'close' stays in h.h and doesn't set the close flag.
+	return !h.ConnectionClose() && !hasConnectionValue(h.h, strClose) && hasConnectionValue(h.h, strUpgrade)
 }
 
 // PeekCookie is able to returns cookie by a given key from response.
@@ -1636,7 +1637,7 @@ func (h *ResponseHeader) All() iter.Seq2[[]byte, []byte] {
 			}
 		}
 
-		if h.ConnectionClose() && !hasConnectionCloseValue(h.h) && !yield(strConnection, strClose) {
+		if h.ConnectionClose() && !hasConnectionValue(h.h, strClose) && !yield(strConnection, strClose) {
 			return
 		}
 	}
@@ -1794,7 +1795,7 @@ func (h *RequestHeader) All() iter.Seq2[[]byte, []byte] {
 				return
 			}
 		}
-		if h.ConnectionClose() && !hasConnectionCloseValue(h.h) && !yield(strConnection, strClose) {
+		if h.ConnectionClose() && !hasConnectionValue(h.h, strClose) && !yield(strConnection, strClose) {
 			return
 		}
 	}
@@ -2636,7 +2637,7 @@ func (h *RequestHeader) peekAll(key []byte) [][]byte {
 	case HeaderConnection:
 		origLen := len(h.mulHeader)
 		h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
-		if h.ConnectionClose() && (len(h.mulHeader) == origLen || !hasConnectionCloseValue(h.h)) {
+		if h.ConnectionClose() && (len(h.mulHeader) == origLen || !hasConnectionValue(h.h, strClose)) {
 			h.mulHeader = append(h.mulHeader, strClose)
 		}
 	case HeaderContentLength:
@@ -2693,7 +2694,7 @@ func (h *ResponseHeader) peekAll(key []byte) [][]byte {
 	case HeaderConnection:
 		origLen := len(h.mulHeader)
 		h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
-		if h.ConnectionClose() && (len(h.mulHeader) == origLen || !hasConnectionCloseValue(h.h)) {
+		if h.ConnectionClose() && (len(h.mulHeader) == origLen || !hasConnectionValue(h.h, strClose)) {
 			h.mulHeader = append(h.mulHeader, strClose)
 		}
 	case HeaderContentLength:
@@ -3323,7 +3324,7 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 		}
 	}
 
-	if h.ConnectionClose() && !hasConnectionCloseValue(h.h) {
+	if h.ConnectionClose() && !hasConnectionValue(h.h, strClose) {
 		dst = appendHeaderLine(dst, strConnection, strClose)
 	}
 
@@ -3442,7 +3443,7 @@ func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 		dst = append(dst, '\r', '\n')
 	}
 
-	if h.ConnectionClose() && !h.disableSpecialHeader && !hasConnectionCloseValue(h.h) {
+	if h.ConnectionClose() && !h.disableSpecialHeader && !hasConnectionValue(h.h, strClose) {
 		dst = appendHeaderLine(dst, strConnection, strClose)
 	}
 
@@ -3891,7 +3892,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	if h.contentLength < 0 {
 		h.contentLengthBytes = h.contentLengthBytes[:0]
 	}
-	if h.contentLength == -2 && !h.ConnectionUpgrade() && !h.mustSkipContentLength() {
+	if h.contentLength == -2 && !h.mustSkipContentLength() {
 		// According to modern HTTP/1.1 specifications (RFC 7230):
 		// `identity` as a value for `Transfer-Encoding` was removed
 		// in the errata to RFC 2616.
@@ -4173,10 +4174,11 @@ func hasOtherHeaderValue(s, value []byte) bool {
 	return false
 }
 
-func hasConnectionCloseValue(h []argsKV) bool {
+// hasConnectionValue reports whether any Connection line in h lists value.
+func hasConnectionValue(h []argsKV, value []byte) bool {
 	for i := range h {
 		if caseInsensitiveCompare(h[i].key, strConnection) {
-			if hasHeaderValue(h[i].value, strClose) {
+			if hasHeaderValue(h[i].value, value) {
 				return true
 			}
 		}
