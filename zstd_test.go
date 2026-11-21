@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -237,41 +238,98 @@ func TestWriteUnzstdWithLimitDecoderMemory(t *testing.T) {
 		t.Fatalf("small-window frame rejected after changing limits: %v", err)
 	}
 
+	// The zstd decoder has its own 512 MiB window limit, which a cap above it
+	// doesn't raise: a 1 GiB window is rejected with a 1 GiB cap, before
+	// anything is allocated for it. The window of a frame without a window
+	// descriptor, a single segment, is its content size, and is limited the same.
+	oneGiBWindowFrame := zstdRawFrame(0xa0, []byte{'x'})
+	oneGiBSegmentFrame := zstdSingleSegmentFrame(1<<30, []byte{'x'})
+	for _, frame := range [][]byte{oneGiBWindowFrame, oneGiBSegmentFrame} {
+		dst.Reset()
+		n, err = writeUnzstd(&dst, frame, 1<<30)
+		if !errors.Is(err, ErrBodyTooLarge) {
+			t.Fatalf("unexpected error for a window over the decoder's own limit: %v", err)
+		}
+		if n != 0 || dst.Len() != 0 {
+			t.Fatalf("unexpected result for a window over the decoder's own limit: n=%d output=%q", n, dst.Bytes())
+		}
+	}
+
+	// Without a limit the decoder's own limit still applies, and its error is
+	// returned, which is no ErrBodyTooLarge: there is no limit to be over.
+	for _, maxBodySize := range []int{0, -1} {
+		for _, tc := range []struct {
+			frame []byte
+			want  error
+		}{
+			{oneGiBWindowFrame, zstd.ErrWindowSizeExceeded},
+			{oneGiBSegmentFrame, zstd.ErrDecoderSizeExceeded},
+		} {
+			dst.Reset()
+			n, err = writeUnzstd(&dst, tc.frame, maxBodySize)
+			if !errors.Is(err, tc.want) || errors.Is(err, ErrBodyTooLarge) {
+				t.Fatalf("maxBodySize=%d: unexpected error for a window over the decoder's own limit: %v. Expecting %v", maxBodySize, err, tc.want)
+			}
+			if n != 0 || dst.Len() != 0 {
+				t.Fatalf("maxBodySize=%d: unexpected result for a window over the decoder's own limit: n=%d output=%q", maxBodySize, n, dst.Bytes())
+			}
+		}
+	}
+
 	maliciousWindowFrame := zstdRawFrame(0x98, []byte("AA"))
 	for _, testCase := range []struct {
 		name   string
-		decode func() error
+		decode func(frame []byte, maxBodySize int) error
 	}{
-		{name: "request unzstd", decode: func() error {
+		{name: "request unzstd", decode: func(frame []byte, maxBodySize int) error {
 			var req Request
-			req.SetBodyRaw(maliciousWindowFrame)
-			_, err := req.BodyUnzstdWithLimit(1)
+			req.SetBodyRaw(frame)
+			_, err := req.BodyUnzstdWithLimit(maxBodySize)
 			return err
 		}},
-		{name: "request uncompressed", decode: func() error {
+		{name: "request uncompressed", decode: func(frame []byte, maxBodySize int) error {
 			var req Request
 			req.Header.SetContentEncoding("zstd")
-			req.SetBodyRaw(maliciousWindowFrame)
-			_, err := req.BodyUncompressedWithLimit(1)
+			req.SetBodyRaw(frame)
+			_, err := req.BodyUncompressedWithLimit(maxBodySize)
 			return err
 		}},
-		{name: "response unzstd", decode: func() error {
+		{name: "response unzstd", decode: func(frame []byte, maxBodySize int) error {
 			var resp Response
-			resp.SetBodyRaw(maliciousWindowFrame)
-			_, err := resp.BodyUnzstdWithLimit(1)
+			resp.SetBodyRaw(frame)
+			_, err := resp.BodyUnzstdWithLimit(maxBodySize)
 			return err
 		}},
-		{name: "response uncompressed", decode: func() error {
+		{name: "response uncompressed", decode: func(frame []byte, maxBodySize int) error {
 			var resp Response
 			resp.Header.SetContentEncoding("zstd")
-			resp.SetBodyRaw(maliciousWindowFrame)
-			_, err := resp.BodyUncompressedWithLimit(1)
+			resp.SetBodyRaw(frame)
+			_, err := resp.BodyUncompressedWithLimit(maxBodySize)
+			return err
+		}},
+		{name: "append unzstd", decode: func(frame []byte, maxBodySize int) error {
+			_, err := AppendUnzstdBytesWithLimit(nil, frame, maxBodySize)
 			return err
 		}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			if err := testCase.decode(); !errors.Is(err, ErrBodyTooLarge) {
+			if err := testCase.decode(maliciousWindowFrame, 1); !errors.Is(err, ErrBodyTooLarge) {
 				t.Fatalf("unexpected error: %v", err)
+			}
+			for _, frame := range [][]byte{oneGiBWindowFrame, oneGiBSegmentFrame} {
+				if err := testCase.decode(frame, 1<<30); !errors.Is(err, ErrBodyTooLarge) {
+					t.Fatalf("unexpected error for a window over the decoder's own limit: %v", err)
+				}
+			}
+			for _, maxBodySize := range []int{0, -1} {
+				err := testCase.decode(oneGiBWindowFrame, maxBodySize)
+				if !errors.Is(err, zstd.ErrWindowSizeExceeded) || errors.Is(err, ErrBodyTooLarge) {
+					t.Fatalf("maxBodySize=%d: unexpected error for a window over the decoder's own limit: %v", maxBodySize, err)
+				}
+				err = testCase.decode(oneGiBSegmentFrame, maxBodySize)
+				if !errors.Is(err, zstd.ErrDecoderSizeExceeded) || errors.Is(err, ErrBodyTooLarge) {
+					t.Fatalf("maxBodySize=%d: unexpected error for a single segment over the decoder's own limit: %v", maxBodySize, err)
+				}
 			}
 		})
 	}
@@ -364,6 +422,16 @@ func zstdRawFrame(windowDescriptor byte, payload []byte) []byte {
 		windowDescriptor,
 		byte(blockHeader), byte(blockHeader >> 8), byte(blockHeader >> 16),
 	}, payload...)
+}
+
+// zstdSingleSegmentFrame is a frame without a window descriptor, which has a
+// window of the size of its content, contentSize, and a raw block of payload.
+func zstdSingleSegmentFrame(contentSize uint64, payload []byte) []byte {
+	blockHeader := uint32(len(payload)<<3 | 1)
+	frame := []byte{0x28, 0xb5, 0x2f, 0xfd, 0xe0}
+	frame = binary.LittleEndian.AppendUint64(frame, contentSize)
+	frame = append(frame, byte(blockHeader), byte(blockHeader>>8), byte(blockHeader>>16))
+	return append(frame, payload...)
 }
 
 func BenchmarkWriteUnzstdPresized(b *testing.B) {

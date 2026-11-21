@@ -283,8 +283,29 @@ func estimateUnzstdSize(p []byte) int {
 
 // AppendUnzstdBytes appends unzstd src to dst and returns the resulting dst.
 func AppendUnzstdBytes(dst, src []byte) ([]byte, error) {
+	return AppendUnzstdBytesWithLimit(dst, src, 0)
+}
+
+// AppendUnzstdBytesWithLimit is like AppendUnzstdBytes, but it stops with
+// ErrBodyTooLarge when src unzstds to more than maxBodySize bytes. The data
+// already in dst doesn't count towards the limit.
+//
+// The limit also caps the zstd decoder window, in steps of 8 MiB: the cap is
+// maxBodySize rounded up to a multiple of 8 MiB, and the 1 KiB minimum window
+// of the format is rounded up in the same way, so it is never below 8 MiB. The
+// zstd decoder has its own window limit of 512 MiB, which the cap doesn't
+// raise. With maxBodySize > 0, a valid frame that requires a window larger
+// than the cap or than 512 MiB returns ErrBodyTooLarge. Without a limit, a
+// frame that requires a window larger than 512 MiB returns the decoder's own
+// error, zstd.ErrWindowSizeExceeded or zstd.ErrDecoderSizeExceeded, which is
+// no ErrBodyTooLarge.
+//
+// The returned dst holds the data that was unzstded before an error.
+//
+// If maxBodySize <= 0, then no limit is applied.
+func AppendUnzstdBytesWithLimit(dst, src []byte, maxBodySize int) ([]byte, error) {
 	w := &byteSliceWriter{b: dst}
-	_, err := WriteUnzstd(w, src)
+	_, err := writeUnzstd(w, src, maxBodySize)
 	return w.b, err
 }
 
