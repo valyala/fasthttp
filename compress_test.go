@@ -241,14 +241,28 @@ func testConcurrent(concurrency int, f func() error) error {
 func varyTokens(h *ResponseHeader) map[string]bool {
 	tokens := make(map[string]bool)
 	for _, v := range h.PeekAll("Vary") {
-		for _, token := range strings.Split(string(v), ",") {
+		for token := range strings.SplitSeq(string(v), ",") {
 			token = strings.TrimSpace(token)
-			if len(token) > 0 {
+			if token != "" {
 				tokens[token] = true
 			}
 		}
 	}
 	return tokens
+}
+
+// countVaryToken counts case-insensitive occurrences of want among the
+// comma-separated tokens of every 'Vary' header line.
+func countVaryToken(h *ResponseHeader, want string) int {
+	n := 0
+	for _, v := range h.PeekAll("Vary") {
+		for token := range strings.SplitSeq(string(v), ",") {
+			if strings.EqualFold(strings.TrimSpace(token), want) {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 func TestCompressHandlerKeepsMultipleVaryLines(t *testing.T) {
@@ -316,5 +330,64 @@ func TestFSServeFileCompressedKeepsMultipleVaryLines(t *testing.T) {
 		if !tokens[want] {
 			t.Fatalf("Vary tokens = %v, missing %q", tokens, want)
 		}
+	}
+}
+
+// TestCompressHandlerVarySecondLineTokenMatching covers the two cases from
+// the review of #2597: a second 'Vary' line of 'X-Accept-Encoding' must not
+// be mistaken for 'Accept-Encoding' (the token must be added), while a
+// second line of 'accept-encoding' must not produce a second copy.
+func TestCompressHandlerVarySecondLineTokenMatching(t *testing.T) {
+	t.Parallel()
+
+	body := strings.Repeat("vary header test ", 100)
+	for _, tc := range []struct {
+		name       string
+		secondLine string
+	}{
+		{"XAcceptEncoding", "X-Accept-Encoding"},
+		{"LowercaseAcceptEncoding", "accept-encoding"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			handler := CompressHandler(func(ctx *RequestCtx) {
+				ctx.Response.Header.Add("Vary", "Origin")
+				ctx.Response.Header.Add("Vary", tc.secondLine)
+				ctx.SetBodyString(body)
+			})
+
+			var ctx RequestCtx
+			wire := "GET / HTTP/1.1\r\nHost: example.com\r\nAccept-Encoding: gzip\r\n\r\n"
+			if err := ctx.Request.Read(bufio.NewReader(strings.NewReader(wire))); err != nil {
+				t.Fatal(err)
+			}
+			handler(&ctx)
+
+			var response Response
+			if err := response.Read(bufio.NewReader(bytes.NewBufferString(ctx.Response.String()))); err != nil {
+				t.Fatal(err)
+			}
+			if got := string(response.Header.ContentEncoding()); got != "gzip" {
+				t.Fatalf("Content-Encoding = %q, want gzip", got)
+			}
+			tokens := varyTokens(&response.Header)
+			if !tokens["Origin"] {
+				t.Fatalf("Vary tokens = %v, missing %q", tokens, "Origin")
+			}
+			if !tokens[tc.secondLine] {
+				t.Fatalf("Vary tokens = %v, missing %q", tokens, tc.secondLine)
+			}
+			if got := countVaryToken(&response.Header, "Accept-Encoding"); got != 1 {
+				t.Fatalf("Accept-Encoding occurs %d times in Vary tokens %v, want 1", got, tokens)
+			}
+			decoded, err := response.BodyGunzip()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(decoded) != body {
+				t.Fatal("decompressed response differs from the original body")
+			}
+		})
 	}
 }

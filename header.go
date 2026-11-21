@@ -439,7 +439,7 @@ func (h *ResponseHeader) SetContentEncodingBytes(contentEncoding []byte) {
 // addVaryBytes add value to the 'Vary' header if it's not included.
 func (h *ResponseHeader) addVaryBytes(value []byte) {
 	for _, v := range h.peekAll(strVary) {
-		if bytes.Contains(v, value) {
+		if hasHeaderValue(v, value) {
 			// 'Vary' is set and already contains target value
 			return
 		}
