@@ -1336,8 +1336,25 @@ func (h *RequestHeader) HasAcceptEncoding(acceptEncoding string) bool {
 // except that a coding with a quality value of 0 is not acceptable.
 // See https://www.rfc-editor.org/rfc/rfc9110.html#section-12.5.3 for details.
 func (h *RequestHeader) HasAcceptEncodingBytes(acceptEncoding []byte) bool {
+	// The field may be sent on several lines, which together form one list.
+	found := false
+	for i := range h.h {
+		if !bytes.Equal(h.h[i].key, strAcceptEncoding) {
+			continue
+		}
+		if hasAcceptEncodingValue(h.h[i].value, acceptEncoding) {
+			return true
+		}
+		found = true
+	}
+	return !found && hasAcceptEncodingValue(peekArgBytes(h.trailerH, strAcceptEncoding), acceptEncoding)
+}
+
+// hasAcceptEncodingValue reports whether the Accept-Encoding field value b
+// lists acceptEncoding as acceptable.
+func hasAcceptEncodingValue(b, acceptEncoding []byte) bool {
 	var vs headerValueScanner
-	vs.b = h.peek(strAcceptEncoding)
+	vs.b = b
 	for vs.next() {
 		v := vs.value
 		if len(v) < len(acceptEncoding) || !caseInsensitiveCompare(v[:len(acceptEncoding)], acceptEncoding) {
