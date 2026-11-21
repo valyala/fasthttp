@@ -4433,6 +4433,77 @@ func TestCompressHandlerVary(t *testing.T) {
 	}
 }
 
+func TestCompressHandlerKeepsAdditionalVaryLines(t *testing.T) {
+	t.Parallel()
+
+	h := CompressHandler(func(ctx *RequestCtx) {
+		ctx.Response.Header.Add("Vary", "Origin")
+		ctx.Response.Header.Add("Vary", "Cookie")
+		ctx.SetBodyString(strings.Repeat("private ", 100))
+	})
+
+	var ctx RequestCtx
+	ctx.Request.Header.Set("Accept-Encoding", "gzip")
+	h(&ctx)
+
+	got := ctx.Response.Header.PeekAll("Vary")
+	lines := make([]string, len(got))
+	for i, v := range got {
+		lines[i] = string(v)
+	}
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "Cookie") {
+		t.Fatalf("later Vary line was dropped: %q", lines)
+	}
+	if !strings.Contains(joined, "Origin") {
+		t.Fatalf("missing Origin in Vary: %q", lines)
+	}
+	if !strings.Contains(joined, "Accept-Encoding") {
+		t.Fatalf("missing Accept-Encoding in Vary: %q", lines)
+	}
+	if string(ctx.Response.Header.ContentEncoding()) != "gzip" {
+		t.Fatalf("expected gzip, got %q", ctx.Response.Header.ContentEncoding())
+	}
+}
+
+func TestCompressHandlerVaryTrailer(t *testing.T) {
+	t.Parallel()
+
+	h := CompressHandler(func(ctx *RequestCtx) {
+		if err := ctx.Response.Header.SetTrailer("Vary"); err != nil {
+			t.Error(err)
+		}
+		ctx.Response.Header.Set("Vary", "Origin")
+		ctx.SetBodyStreamWriter(func(w *bufio.Writer) {
+			fmt.Fprint(w, strings.Repeat("private ", 100))
+		})
+	})
+
+	var ctx RequestCtx
+	ctx.Request.Header.Set("Accept-Encoding", "gzip")
+	h(&ctx)
+
+	var buf bytes.Buffer
+	bw := bufio.NewWriter(&buf)
+	if err := ctx.Response.Write(bw); err != nil {
+		t.Fatal(err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+
+	var resp Response
+	if err := resp.Read(bufio.NewReader(&buf)); err != nil {
+		t.Fatal(err)
+	}
+	if ce := string(resp.Header.ContentEncoding()); ce != "gzip" {
+		t.Fatalf("expected gzip, got %q", ce)
+	}
+	if got := string(resp.Header.TrailerHeader()); got != "Vary: Origin,Accept-Encoding\r\n\r\n" {
+		t.Fatalf("unexpected trailer %q", got)
+	}
+}
+
 func TestRequestCtxWriteString(t *testing.T) {
 	t.Parallel()
 

@@ -436,16 +436,42 @@ func (h *ResponseHeader) SetContentEncodingBytes(contentEncoding []byte) {
 	h.contentEncoding = initHeaderValueBytes(h.contentEncoding, contentEncoding)
 }
 
-// addVaryBytes add value to the 'Vary' header if it's not included.
+// addVaryBytes adds value to the Vary header if it is not already present.
+// Set would replace every existing Vary line, so the first line in the
+// section Vary is written to (the trailer section once Vary is announced as
+// a trailer) is extended in place and any additional lines are kept.
 func (h *ResponseHeader) addVaryBytes(value []byte) {
-	v := h.peek(strVary)
-	if len(v) == 0 {
-		// 'Vary' is not set
-		h.SetBytesV(HeaderVary, value)
-	} else if !bytes.Contains(v, value) {
-		// 'Vary' is set and not contains target value
-		h.SetBytesV(HeaderVary, append(append(v, ','), value...))
-	} // else: 'Vary' is set and contains target value
+	if hasVaryValue(h.h, value) || hasVaryValue(h.trailerH, value) {
+		return
+	}
+	section := h.h
+	if h.isTrailerKey(strVary) {
+		section = h.trailerH
+	}
+	for i := range section {
+		kv := &section[i]
+		if !caseInsensitiveCompare(kv.key, strVary) {
+			continue
+		}
+		if len(kv.value) > 0 {
+			kv.value = append(kv.value, ',')
+		}
+		kv.value = append(kv.value, value...)
+		kv.noValue = false
+		return
+	}
+	h.SetBytesV(HeaderVary, value)
+}
+
+// hasVaryValue reports whether any Vary line in kvs lists the field name
+// value, compared case-insensitively as a whole list element.
+func hasVaryValue(kvs []argsKV, value []byte) bool {
+	for i := range kvs {
+		if caseInsensitiveCompare(kvs[i].key, strVary) && hasHeaderValue(kvs[i].value, value) {
+			return true
+		}
+	}
+	return false
 }
 
 // Server returns Server header value.
