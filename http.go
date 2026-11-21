@@ -1972,6 +1972,12 @@ func (resp *Response) ReadBody(r *bufio.Reader, maxBodySize int) (err error) {
 	bodyBuf.Reset()
 
 	contentLength := resp.Header.ContentLength()
+	if contentLength == -2 && !resp.mustSkipBody() {
+		// With no declared length the body is delimited by EOF, so the peer
+		// has closed the connection. It cannot be pooled again, even with an
+		// explicit keep-alive. Set the flag before the streamed path returns.
+		resp.Header.SetConnectionClose()
+	}
 	if resp.StreamBody {
 		resp.bodyStream = acquireResponseStream(bodyBuf, r, &resp.Header)
 		return nil

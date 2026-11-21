@@ -2467,6 +2467,16 @@ func (h *RequestHeader) SetCanonical(key, value []byte) {
 		return
 	}
 	h.setNonSpecial(key, h.bufV)
+	if h.disableSpecialHeader && caseInsensitiveCompare(key, strConnection) {
+		// Without special header processing the setter above only replaces
+		// the raw field. Keep the close flag and the stored values in sync
+		// with the Connection field the caller just wrote.
+		if hasHeaderValue(value, strClose) {
+			h.connectionClose = true
+		} else {
+			h.ResetConnectionClose()
+		}
+	}
 }
 
 // Peek returns header value for the given key.
@@ -3882,8 +3892,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	}
 	if h.noHTTP11 && !h.connectionClose {
 		// close connection for non-http/1.1 response unless 'Connection: keep-alive' is set.
-		v := peekArgBytes(h.h, strConnection)
-		h.connectionClose = !hasHeaderValue(v, strKeepAlive)
+		h.connectionClose = !hasConnectionKeepAliveValue(h.h)
 	}
 
 	return s.r, nil
@@ -3964,6 +3973,12 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 		}
 
 		if h.disableSpecialHeader {
+			// Special header processing is disabled, but an explicit close
+			// must still take precedence over a later keep-alive, the same
+			// way it does when special headers are processed.
+			if caseInsensitiveCompare(s.key, strConnection) && hasHeaderValue(s.value, strClose) {
+				h.connectionClose = true
+			}
 			h.h = appendArgNormalized(h.h, s.key, s.value, disableNormalizing)
 			continue
 		}
@@ -4064,8 +4079,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 	}
 	if h.noHTTP11 && !h.connectionClose {
 		// close connection for non-http/1.1 request unless 'Connection: keep-alive' is set.
-		v := peekArgBytes(h.h, strConnection)
-		h.connectionClose = !hasHeaderValue(v, strKeepAlive)
+		h.connectionClose = !hasConnectionKeepAliveValue(h.h)
 	}
 	return s.r, s.rawSaved, nil
 }
@@ -4158,6 +4172,20 @@ func hasConnectionCloseValue(h []argsKV) bool {
 	for i := range h {
 		if caseInsensitiveCompare(h[i].key, strConnection) {
 			if hasHeaderValue(h[i].value, strClose) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasConnectionKeepAliveValue reports whether any of the Connection headers
+// holds the keep-alive option. A header may be repeated, and the option may
+// be one of several in the list.
+func hasConnectionKeepAliveValue(h []argsKV) bool {
+	for i := range h {
+		if caseInsensitiveCompare(h[i].key, strConnection) {
+			if hasHeaderValue(h[i].value, strKeepAlive) {
 				return true
 			}
 		}
