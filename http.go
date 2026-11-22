@@ -1633,7 +1633,11 @@ func (resp *Response) resetSkipHeader() {
 	resp.ResetBody()
 }
 
-// Read reads request (including body) from the given r.
+// Read reads a request (including the body) from r.
+//
+// If the request arrives in fragments, supply them through one reader to
+// the same call. Each call starts a fresh parse. To read only the request
+// header, use [RequestHeader.Read].
 //
 // Read does not limit the request body size. Use ReadLimitBody with a positive
 // maxBodySize when reading requests from untrusted sources.
