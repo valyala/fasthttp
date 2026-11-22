@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -702,6 +703,82 @@ func TestRequestRawHeaders(t *testing.T) {
 			t.Fatalf("expected header %q, got %q", exp, raw)
 		}
 	})
+}
+
+func TestRequestDelLowercaseConnectionClearsCloseFlag(t *testing.T) {
+	t.Parallel()
+
+	// With normalization off the field stays lowercase. Deleting it must clear
+	// the close flag too, or HostClient would discard a reusable connection.
+	var h RequestHeader
+	h.DisableSpecialHeader()
+	h.DisableNormalizing()
+	raw := "GET / HTTP/1.1\r\nHost: example.com\r\nconnection: close\r\n\r\n"
+	br := bufio.NewReader(bytes.NewBufferString(raw))
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !h.ConnectionClose() {
+		t.Fatal("expected ConnectionClose after reading connection: close")
+	}
+
+	h.Del("connection")
+	if h.ConnectionClose() {
+		t.Fatal("ConnectionClose still true after deleting the lowercase field")
+	}
+	if vals := h.PeekAll("Connection"); len(vals) != 0 {
+		t.Fatalf("PeekAll(Connection) = %q, want none", vals)
+	}
+
+	// The same must hold through the client path: a deleted Connection field
+	// leaves the connection reusable.
+	clientConn, serverConn := net.Pipe()
+	go func() {
+		defer serverConn.Close()
+		buf := make([]byte, 4096)
+		_, _ = serverConn.Read(buf)
+		_, _ = serverConn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"))
+		_, _ = serverConn.Read(buf)
+	}()
+	hc := &HostClient{
+		Addr: "example.com:80",
+		Dial: func(string) (net.Conn, error) { return clientConn, nil },
+	}
+	var req Request
+	req.SetRequestURI("http://example.com/")
+	req.Header.DisableSpecialHeader()
+	req.Header.DisableNormalizing()
+	if err := req.Header.Read(bufio.NewReader(bytes.NewBufferString(
+		"GET / HTTP/1.1\r\nHost: example.com\r\nconnection: close\r\n\r\n"))); err != nil {
+		t.Fatalf("unexpected request header read error: %v", err)
+	}
+	req.Header.Del("connection")
+	var resp Response
+	if err := hc.Do(&req, &resp); err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	if n := hc.IdleConnsCount(); n != 1 {
+		t.Fatalf("idle connections = %d, want 1", n)
+	}
+}
+
+func BenchmarkRequestHeaderReplaceConnection(b *testing.B) {
+	raw := []byte("GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
+	r := bytes.NewReader(nil)
+	br := bufio.NewReader(r)
+	var h RequestHeader
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _ = r.Seek(0, io.SeekStart)
+		br.Reset(r)
+		r.Reset(raw)
+		h.Reset()
+		h.DisableSpecialHeader()
+		if err := h.Read(br); err != nil {
+			b.Fatal(err)
+		}
+		h.SetCanonical([]byte("Connection"), []byte("keep-alive"))
+	}
 }
 
 func TestRequestDisableSpecialHeaders(t *testing.T) {
@@ -6708,6 +6785,9 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
 func TestRequestHeaderDisableSpecialHeaderSetConnectionSyncsCloseFlag(t *testing.T) {
 	t.Parallel()
 
@@ -6735,6 +6815,5 @@ func TestRequestHeaderDisableSpecialHeaderSetConnectionSyncsCloseFlag(t *testing
 	h.Set(HeaderConnection, "close")
 	if !h.ConnectionClose() {
 		t.Fatal("ConnectionClose false after Set(Connection, close)")
-}
 	}
 }

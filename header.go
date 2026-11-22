@@ -1983,8 +1983,6 @@ func (h *RequestHeader) del(key []byte) {
 	case HeaderContentLength:
 		h.contentLength = 0
 		h.contentLengthBytes = h.contentLengthBytes[:0]
-	case HeaderConnection:
-		h.connectionClose = false
 	case HeaderTrailer:
 		if d := h.dedicatedUserAgent(); d.value != nil {
 			h.restoreTrailer(d)
@@ -1993,6 +1991,12 @@ func (h *RequestHeader) del(key []byte) {
 		// keeps the values after it, and those returning, in order.
 		h.h = delAllArgsStable(h.h, HeaderTrailer)
 		h.unannounceTrailers()
+	}
+	// With DisableNormalizing the key can be lowercase, so the switch above
+	// does not see HeaderConnection. Clear the flag for any casing, otherwise
+	// deleting the field would still close a reusable connection.
+	if caseInsensitiveCompare(strConnection, key) {
+		h.connectionClose = false
 	}
 	h.h = delAllArgs(h.h, b2s(key))
 	h.trailerH = delAllArgs(h.trailerH, b2s(key))
@@ -2538,19 +2542,19 @@ func (h *RequestHeader) SetBytesKV(key, value []byte) {
 // it will be sent after the chunked request body.
 func (h *RequestHeader) SetCanonical(key, value []byte) {
 	h.bufV = initHeaderValueBytes(h.bufV, value)
+	connection := h.disableSpecialHeader && caseInsensitiveCompare(key, strConnection)
+	if connection {
+		// Clear the old close state before storing the replacement. Doing it
+		// afterwards makes ResetConnectionClose copy the new value through a
+		// temporary buffer, which costs an allocation on a warmed path.
+		h.ResetConnectionClose()
+	}
 	if h.setSpecialHeader(key, h.bufV, false) {
 		return
 	}
 	h.setNonSpecial(key, h.bufV)
-	if h.disableSpecialHeader && caseInsensitiveCompare(key, strConnection) {
-		// Without special header processing the setter above only replaces
-		// the raw field. Keep the close flag and the stored values in sync
-		// with the Connection field the caller just wrote.
-		if hasHeaderValue(value, strClose) {
-			h.connectionClose = true
-		} else {
-			h.ResetConnectionClose()
-		}
+	if connection && hasHeaderValue(h.bufV, strClose) {
+		h.connectionClose = true
 	}
 }
 
