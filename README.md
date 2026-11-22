@@ -40,6 +40,32 @@ connections per physical server.
 
 [FAQ](#faq)
 
+## HTTP/2
+
+The opt-in `github.com/valyala/fasthttp/http2` package adds native HTTP/2
+server and client support; programs that don't configure it stay on the
+HTTP/1 path.
+
+```go
+server := &fasthttp.Server{Handler: handler}
+if err := http2.ConfigureServer(server, http2.ServerConfig{}); err != nil {
+    log.Fatal(err)
+}
+log.Fatal(server.ListenAndServeTLS(":8443", "cert.pem", "key.pem"))
+```
+
+```go
+client := &fasthttp.HostClient{Addr: "example.com:443", IsTLS: true}
+if err := http2.ConfigureHostClient(client, http2.ClientConfig{}); err != nil {
+    log.Fatal(err)
+}
+```
+
+The server accepts TLS ALPN `h2`, cleartext prior knowledge and the `h2c`
+Upgrade on the same listener. TLS clients prefer HTTP/2 and fall back to
+HTTP/1.1 on the same connection; cleartext HTTP/2 needs `PriorKnowledge`.
+[`http2/DESIGN.md`](http2/DESIGN.md) has the details.
+
 ## HTTP server performance comparison with [net/http](https://pkg.go.dev/net/http)
 
 In short, fasthttp server is up to 6 times faster than net/http.
@@ -654,7 +680,8 @@ This is an **unsafe** way, the result string and `[]byte` buffer share the same 
 
 - _Does fasthttp support HTTP/2.0 and WebSockets?_
 
-  [HTTP/2.0 support](https://github.com/fasthttp/http2) is in progress. WebSockets are provided by the
+  HTTP/2 is available in the opt-in
+  [`http2`](https://pkg.go.dev/github.com/valyala/fasthttp/http2) package. WebSockets are provided by the
   [websocket](https://pkg.go.dev/github.com/valyala/fasthttp/websocket) package in this repository.
   Third parties also may use [RequestCtx.Hijack](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Hijack)
   for implementing these goodies.
@@ -663,7 +690,6 @@ This is an **unsafe** way, the result string and `[]byte` buffer share the same 
 
   Yes:
 
-  - net/http supports [HTTP/2.0 starting from go1.6](https://pkg.go.dev/golang.org/x/net/http2).
   - net/http API is stable, while fasthttp API constantly evolves.
   - net/http handles more HTTP corner cases.
   - net/http can stream both request and response bodies

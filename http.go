@@ -132,6 +132,10 @@ type Response struct {
 	bodyStream       io.Reader
 	bodyStreamWriter *fixedSizeBodyWriter
 
+	// streamWriters are the readers SetBodyStreamWriter made while
+	// lazyStreamWriter, a protocol stream's setting, deferred their writers.
+	streamWriters []*lazyStreamReader
+
 	// Remote TCPAddr from concurrently net.Conn.
 	raddr net.Addr
 	// Local TCPAddr from concurrently net.Conn.
@@ -192,6 +196,7 @@ type Response struct {
 
 	preserveBodyBuffer    bool
 	secureErrorLogMessage bool
+	lazyStreamWriter      bool
 
 	// headResponse and connectResponse are set by the clients when the
 	// response answers a HEAD or CONNECT request. Unlike SkipBody they are
@@ -408,6 +413,12 @@ func (req *Request) SetBodyStreamWriter(sw StreamWriter) {
 //
 // See also SetBodyStream.
 func (resp *Response) SetBodyStreamWriter(sw StreamWriter) {
+	if resp.lazyStreamWriter {
+		sr := newLazyStreamReader(sw)
+		resp.SetBodyStream(sr, -1)
+		resp.streamWriters = append(resp.streamWriters, sr)
+		return
+	}
 	sr := NewStreamReader(sw)
 	resp.SetBodyStream(sr, -1)
 }
@@ -2214,18 +2225,16 @@ func (req *Request) onlyMultipartForm() bool {
 	return req.multipartForm != nil && (req.body == nil || len(req.body.B) == 0)
 }
 
-// Write writes request to w.
-//
-// Write doesn't flush request to w for performance reasons.
-//
-// See also WriteTo.
-func (req *Request) Write(w *bufio.Writer) error {
+// prepareForWrite settles the Host header, request URI and Authorization
+// from the URI and selects the buffered body, as Write sends it. A body stream
+// is left in place and nil is returned for it.
+func (req *Request) prepareForWrite() ([]byte, error) {
 	if len(req.Header.Host()) == 0 || req.parsedURI {
 		uri := req.URI()
 		host := uri.Host()
 		if len(req.Header.Host()) == 0 {
 			if len(host) == 0 {
-				return errRequestHostRequired
+				return nil, errRequestHostRequired
 			}
 			req.Header.SetHostBytes(host)
 		} else if !req.UseHostHeader {
@@ -2256,7 +2265,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 	}
 
 	if req.bodyStream != nil {
-		return req.writeBodyStream(w)
+		return nil, nil
 	}
 
 	body := req.bodyBytes()
@@ -2264,7 +2273,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 	if req.onlyMultipartForm() {
 		body, err = marshalMultipartForm(req.multipartForm, req.multipartFormBoundary)
 		if err != nil {
-			return fmt.Errorf("error when marshaling multipart form: %w", err)
+			return nil, fmt.Errorf("error when marshaling multipart form: %w", err)
 		}
 		req.Header.SetMultipartFormBoundary(req.multipartFormBoundary)
 	}
@@ -2272,8 +2281,26 @@ func (req *Request) Write(w *bufio.Writer) error {
 	if len(body) == 0 {
 		body = req.postArgs.QueryString()
 	}
+	return body, nil
+}
+
+// Write writes request to w.
+//
+// Write doesn't flush request to w for performance reasons.
+//
+// See also WriteTo.
+func (req *Request) Write(w *bufio.Writer) error {
+	body, err := req.prepareForWrite()
+	if err != nil {
+		return err
+	}
+
+	if req.bodyStream != nil {
+		return req.writeBodyStream(w)
+	}
+
 	hasBody := len(body) != 0 || !req.Header.ignoreBody()
-	chunked := hasBody && len(req.Header.trailer) > 0 && req.Header.IsHTTP11()
+	chunked := hasBody && len(req.Header.trailer) > 0 && req.Header.wireIsHTTP11()
 	contentLength := len(body)
 	if chunked {
 		contentLength = -1
@@ -2765,7 +2792,7 @@ func (resp *Response) write(conn net.Conn, w *bufio.Writer) error {
 	if sendBody || bodyLen > 0 {
 		resp.Header.SetContentLength(bodyLen)
 	}
-	if sendBody && len(resp.Header.trailer) > 0 && resp.Header.IsHTTP11() {
+	if sendBody && len(resp.Header.trailer) > 0 && resp.Header.wireIsHTTP11() {
 		resp.Header.SetContentLength(-1)
 		if err := resp.Header.Write(w); err != nil {
 			return err
@@ -2829,9 +2856,9 @@ func vectorWriter(c net.Conn) io.Writer {
 	return nil
 }
 
-func (req *Request) writeBodyStream(w *bufio.Writer) error {
-	var err error
-
+// bodyStreamLength settles the body stream's framing in the header and
+// returns the length to write, -1 for chunked.
+func (req *Request) bodyStreamLength() (int, error) {
 	contentLength := req.Header.ContentLength()
 	if req.Header.disableSpecialHeader && req.Header.contentLength != -2 {
 		// SetBodyStream's size is authoritative for outgoing raw headers.
@@ -2852,11 +2879,20 @@ func (req *Request) writeBodyStream(w *bufio.Writer) error {
 		}
 	}
 	if req.Header.disableSpecialHeader {
-		if err = req.Header.setRawBodyFraming(contentLength, true); err != nil {
-			_ = req.closeBodyStream()
-			return err
+		if err := req.Header.setRawBodyFraming(contentLength, true); err != nil {
+			return contentLength, err
 		}
-	} else if contentLength < 0 {
+	}
+	return contentLength, nil
+}
+
+func (req *Request) writeBodyStream(w *bufio.Writer) error {
+	contentLength, err := req.bodyStreamLength()
+	if err != nil {
+		_ = req.closeBodyStream()
+		return err
+	}
+	if contentLength < 0 && !req.Header.disableSpecialHeader {
 		req.Header.SetContentLength(-1)
 	}
 	req.Header.written = true
@@ -2880,14 +2916,18 @@ type ErrBodyStreamWritePanic struct {
 	error
 }
 
+func newBodyStreamWritePanic(recovered any) *ErrBodyStreamWritePanic {
+	return &ErrBodyStreamWritePanic{
+		error: fmt.Errorf("panic while writing body stream: %+v", recovered),
+	}
+}
+
 func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) (err error) {
 	resp.Header.written = true
 	defer func() {
 		resp.Header.written = false
 		if r := recover(); r != nil {
-			err = &ErrBodyStreamWritePanic{
-				error: fmt.Errorf("panic while writing body stream: %+v", r),
-			}
+			err = newBodyStreamWritePanic(r)
 		}
 	}()
 
