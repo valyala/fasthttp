@@ -64,6 +64,12 @@ func TestNewVHostPathRewriter(t *testing.T) {
 	if string(path) != expectedPath {
 		t.Fatalf("unexpected path %q. Expecting %q", path, expectedPath)
 	}
+
+	ctx.Request.Reset()
+	ctx.Request.SetRequestURI("https://aaa.bbb.cc/one")
+	if path := f(&ctx); string(path) != "/aaa.bbb.cc/" {
+		t.Fatalf("fully stripped path = %q, want /aaa.bbb.cc/", path)
+	}
 }
 
 func TestNewVHostPathRewriterMaliciousHost(t *testing.T) {
@@ -112,12 +118,6 @@ func TestNewVHostPathRewriterEndToEnd(t *testing.T) {
 	}
 	server := &Server{Handler: fs.NewRequestHandler(), Logger: TestLogger{t}}
 
-	// Windows normalization leaves `/../root-private.txt`, which FS must reject.
-	backslashStatus, backslashBody := StatusNotFound, "Cannot open requested path"
-	if runtime.GOOS == "windows" {
-		backslashStatus, backslashBody = StatusInternalServerError, "Internal Server Error"
-	}
-
 	for _, tc := range []struct {
 		name       string
 		host       string
@@ -127,12 +127,14 @@ func TestNewVHostPathRewriterEndToEnd(t *testing.T) {
 	}{
 		{"normal vhost file", "example.com", "/public.txt", StatusOK, "PUBLIC-MARKER"},
 		{"root file is isolated", "example.com", "/root-private.txt", StatusNotFound, "Cannot open requested path"},
+		{"host names a root file", "root-private.txt", "/", StatusNotFound, "Cannot open requested path"},
+		{"slash after a public file", "example.com", "/public.txt/", StatusNotFound, "Cannot open requested path"},
 		{"dot host", ".", "/root-private.txt", StatusNotFound, "Cannot open requested path"},
 		{"double dot host", "..", "/root-private.txt", StatusNotFound, "Cannot open requested path"},
 		{"encoded dot host", "%252e", "/root-private.txt", StatusNotFound, "Cannot open requested path"},
 		{"encoded parent path", "example.com", "/%252e%252e/root-private.txt", StatusNotFound, "Cannot open requested path"},
 		{"nested encoded parent path", "example.com", "/safe/%252e%252e/%252e%252e/root-private.txt", StatusNotFound, "Cannot open requested path"},
-		{"backslash parent path", "example.com", "/a/..%5c../root-private.txt", backslashStatus, backslashBody},
+		{"backslash parent path", "example.com", "/a/..%5c../root-private.txt", StatusNotFound, "Cannot open requested path"},
 		{"literal encoded name", "example.com", "/%252e%252e/literal-name.txt", StatusOK, "LITERAL-NAME-MARKER"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3300,10 +3302,9 @@ func TestFSSharedCompressRoot(t *testing.T) {
 	}
 }
 
-// TestFSRootStaleCompressedFileInRoot checks that a stale precompressed file
-// next to its original in Root is removed from Root when the compressed
-// copies FS writes go to a separate CompressRoot.
-func TestFSRootStaleCompressedFileInRoot(t *testing.T) {
+// A stale precompressed file in Root must be removed, and a stale generated
+// copy in CompressRoot must be replaced with the current contents.
+func TestFSRootStaleCompressedFiles(t *testing.T) {
 	t.Parallel()
 
 	compressible := bytes.Repeat([]byte("compressible-data-"), 1000)
@@ -3316,9 +3317,15 @@ func TestFSRootStaleCompressedFileInRoot(t *testing.T) {
 			"app.js":             compressible,
 			"app.js.fasthttp.gz": AppendGzipBytes(nil, []byte("stale")),
 		})
+		fsRootTestWriteFiles(t, compressedCacheDir(root, compressRoot), map[string][]byte{
+			"app.js.fasthttp.gz": AppendGzipBytes(nil, []byte("stale cache")),
+		})
+		cached := filepath.Join(compressedCacheDir(root, compressRoot), "app.js.fasthttp.gz")
 		old := time.Now().Add(-time.Hour)
-		if err := os.Chtimes(stale, old, old); err != nil {
-			t.Fatal(err)
+		for _, path := range []string{stale, cached} {
+			if err := os.Chtimes(path, old, old); err != nil {
+				t.Fatal(err)
+			}
 		}
 
 		h := (&FS{
@@ -3338,7 +3345,7 @@ func TestFSRootStaleCompressedFileInRoot(t *testing.T) {
 			t.Errorf("AllowSymlinksOutsideRoot=%v: stale compressed file in Root wasn't removed (stat error %v)",
 				allowSymlinksOutsideRoot, err)
 		}
-		if _, err := os.Stat(filepath.Join(compressedCacheDir(root, compressRoot), "app.js.fasthttp.gz")); err != nil {
+		if _, err := os.Stat(cached); err != nil {
 			t.Errorf("AllowSymlinksOutsideRoot=%v: compressed file wasn't written to CompressRoot: %v",
 				allowSymlinksOutsideRoot, err)
 		}

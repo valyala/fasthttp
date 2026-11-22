@@ -475,13 +475,7 @@ func isAuthorityDelimiter(uri []byte, n int) bool {
 	if n == 0 {
 		return true
 	}
-	scheme := uri[:n]
-	if scheme[len(scheme)-1] != ':' {
-		return false
-	}
-	// splitHostURI also accepts the empty scheme in "://host".
-	scheme = scheme[:len(scheme)-1]
-	return len(scheme) == 0 || isValidScheme(scheme)
+	return uri[n-1] == ':' && isValidScheme(uri[:n-1])
 }
 
 // parseHost parses host as an authority without user
@@ -732,14 +726,12 @@ func removeSegments(b, p []byte) []byte {
 }
 
 // removeParentSegments removes every occurrence of p from b together with the
-// path segment in front of it, and returns the result written over b. sep is
-// the separator left where that segment started; a zero sep keeps the byte
-// that is already there.
+// path segment in front of it, and returns the result written over b.
 //
 // Single pass for the same reason as removeSegments. Each parent lookup walks
 // back over a segment that the removal then drops, so the lookups add up to
 // one more pass over b.
-func removeParentSegments(b, p []byte, sep byte) []byte {
+func removeParentSegments(b, p []byte) []byte {
 	n := bytes.Index(b, p)
 	if n < 0 {
 		return b
@@ -751,9 +743,6 @@ func removeParentSegments(b, p []byte, sep byte) []byte {
 		w++
 		for w >= len(p) && b[w-1] == last && bytes.Equal(b[w-len(p):w], p) {
 			w = max(bytes.LastIndexByte(b[:w-len(p)], '/'), 0)
-			if sep != 0 {
-				b[w] = sep
-			}
 			w++
 		}
 	}
@@ -794,11 +783,15 @@ func normalizePath(dst, src []byte) []byte {
 // removeDotSegments removes the "." and ".." segments from path b and returns
 // the result written over b.
 func removeDotSegments(b []byte) []byte {
+	if filepath.Separator == '\\' && bytes.IndexByte(b, '\\') >= 0 {
+		return removeWindowsDotSegments(b)
+	}
+
 	// remove /./ parts
 	b = removeSegments(b, strSlashDotSlash)
 
 	// remove /foo/../ parts
-	b = removeParentSegments(b, strSlashDotDotSlash, '/')
+	b = removeParentSegments(b, strSlashDotDotSlash)
 
 	// remove trailing /foo/..
 	n := bytes.LastIndex(b, strSlashDotDot)
@@ -816,39 +809,70 @@ func removeDotSegments(b []byte) []byte {
 		b = b[:len(b)-1]
 	}
 
-	if filepath.Separator == '\\' {
-		// remove \.\ parts
-		b = removeSegments(b, strBackSlashDotBackSlash)
-
-		// remove /foo/..\ parts
-		b = removeParentSegments(b, strSlashDotDotBackSlash, 0)
-
-		// remove /foo\..\ parts
-		rooted := len(b) > 0 && b[0] == '/'
-		b = removeParentSegments(b, strBackSlashDotDotBackSlash, '\\')
-		if rooted {
-			// Collapsing a segment at the root can replace the URI's leading
-			// slash with a backslash. Keep the slash in the normalized path.
-			b[0] = '/'
-		}
-
-		// remove trailing \foo\..
-		n := bytes.LastIndex(b, strBackSlashDotDot)
-		if n >= 0 && n+len(strSlashDotDot) == len(b) {
-			nn := bytes.LastIndexByte(b[:n], '/')
-			if nn < 0 {
-				return append(b[:0], strSlash...)
-			}
-			b = b[:nn+1]
-		}
-	}
-
 	return b
+}
+
+// removeWindowsDotSegments resolves both kinds of separator in the same pass.
+// Keep the original separators between surviving segments.
+func removeWindowsDotSegments(b []byte) []byte {
+	isSeparator := func(c byte) bool { return c == '/' || c == '\\' }
+
+	// normalizePath provides a leading slash. Keep it even if a parent
+	// segment would otherwise walk above the root.
+	w := 1
+	for r := 1; r < len(b); {
+		end := r
+		for end < len(b) && !isSeparator(b[end]) {
+			end++
+		}
+		switch string(b[r:end]) {
+		case "..":
+			for w > 1 && isSeparator(b[w-1]) {
+				w--
+			}
+			for w > 1 && !isSeparator(b[w-1]) {
+				w--
+			}
+		case ".":
+			// Keep the separator already written before this segment.
+		default:
+			if end < len(b) {
+				end++
+			}
+			w += copy(b[w:], b[r:end])
+			r = end
+			continue
+		}
+		for end < len(b) && isSeparator(b[end]) {
+			end++
+		}
+		r = end
+	}
+	return b[:w]
 }
 
 // RequestURI returns RequestURI - i.e. URI without Scheme and Host.
 func (u *URI) RequestURI() []byte {
 	return u.requestURIBytes(u.DisablePathNormalizing)
+}
+
+func (u *URI) isConnectAuthority() bool {
+	if len(u.queryString) != 0 || (u.parsedQueryArgs && u.queryArgs.Len() != 0) || len(u.hash) != 0 {
+		return false
+	}
+
+	// net/http also writes opaque CONNECT targets in the form "//host:port".
+	target := bytes.TrimPrefix(u.PathOriginal(), strSlashSlash)
+	colon := bytes.LastIndexByte(target, ':')
+	if colon <= 0 || colon == len(target)-1 || !validOptionalPort(target[colon:]) {
+		return false
+	}
+
+	// parseHost checks the port and rejects path separators, including escaped
+	// ones. It unescapes in place, so leave the original target intact.
+	u.requestURI = append(u.requestURI[:0], target...)
+	_, err := parseHost(u.requestURI)
+	return err == nil
 }
 
 // requestURIBytes is like RequestURI, with path normalization disabled
@@ -1033,7 +1057,8 @@ func (u *URI) updateBytes(newURI, buf []byte) ([]byte, error) {
 	}
 }
 
-// FullURI returns full uri in the form {Scheme}://{Host}{RequestURI}#{Hash}.
+// FullURI returns the full URI, inserting a slash after the host if the
+// request target does not start with one.
 //
 // The returned bytes are valid until the next URI method call.
 func (u *URI) FullURI() []byte {
@@ -1044,7 +1069,11 @@ func (u *URI) FullURI() []byte {
 // AppendBytes appends full uri to dst and returns the extended dst.
 func (u *URI) AppendBytes(dst []byte) []byte {
 	dst = u.appendSchemeHost(dst)
-	dst = append(dst, u.RequestURI()...)
+	requestURI := u.RequestURI()
+	if requestURI[0] != '/' {
+		dst = append(dst, '/')
+	}
+	dst = append(dst, requestURI...)
 	if len(u.hash) > 0 || u.forceHash {
 		dst = append(dst, '#')
 		dst = append(dst, u.hash...)

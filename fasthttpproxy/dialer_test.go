@@ -305,6 +305,32 @@ func TestDialerGetDialFuncForTLS(t *testing.T) {
 	}
 }
 
+func TestDialerRejectsMalformedExplicitProxy(t *testing.T) {
+	const bad = "socks5://user:secret@127.0.0.1:1080\n"
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	conn, err := FasthttpSocksDialer(bad)(ln.Addr().String())
+	if conn != nil {
+		conn.Close()
+		t.Fatal("connected directly despite malformed proxy URL")
+	}
+	if err == nil || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("expected a proxy error without credentials, got %v", err)
+	}
+
+	d := getDialer("127.0.0.1:8080", bad, "internal.example")
+	if _, err := d.GetDialFunc(false); err == nil {
+		t.Fatal("expected a proxy configuration error")
+	}
+	if _, err := d.GetDialFuncForTLS(false, false); err != nil {
+		t.Fatalf("unused HTTPS proxy prevented HTTP dialer setup: %v", err)
+	}
+}
+
 func TestDialerGetDialFuncForTLSCGIEnvironment(t *testing.T) {
 	proxyURL := "http://127.0.0.1:8080"
 	t.Setenv("HTTP_PROXY", proxyURL)

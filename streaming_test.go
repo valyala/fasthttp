@@ -322,6 +322,26 @@ func TestRequestStreamStaysAtEOF(t *testing.T) {
 	}
 }
 
+func TestRequestStreamCoalescesBufferedChunks(t *testing.T) {
+	t.Parallel()
+
+	for _, tail := range []string{"", "1", "1\r\n", "1\r\nc", "1\r\nc\r", "00;end\r\n"} {
+		t.Run(fmt.Sprintf("tail=%q", tail), func(t *testing.T) {
+			const chunks = "1\r\na\r\n01;ext\r\nb\r\n"
+			var h RequestHeader
+			h.SetContentLength(-1)
+			rs := acquireRequestStream(&bytebufferpool.ByteBuffer{}, bufio.NewReader(strings.NewReader(chunks+tail)), &h)
+			defer releaseRequestStream(rs)
+
+			var buf [16]byte
+			n, err := rs.Read(buf[:])
+			if err != nil || string(buf[:n]) != "ab" {
+				t.Fatalf("Read = %q, %v; want both buffered chunks before the incomplete framing", buf[:n], err)
+			}
+		})
+	}
+}
+
 func TestRequestStreamChunkedTruncatedAtChunkBoundary(t *testing.T) {
 	t.Parallel()
 

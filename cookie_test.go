@@ -639,6 +639,7 @@ func TestCookieAppendBytes(t *testing.T) {
 	c := &Cookie{}
 
 	testCookieAppendBytes(t, c, "", "bar", "bar")
+	testCookieAppendBytes(t, c, "", "user=root", "=user=root")
 	testCookieAppendBytes(t, c, "foo", "", "foo=")
 	testCookieAppendBytes(t, c, "ффф", "12 лодлы", "ффф=12 лодлы")
 

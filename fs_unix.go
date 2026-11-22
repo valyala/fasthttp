@@ -4,6 +4,6 @@ package fasthttp
 
 var serveFilePathRewrite PathRewriteFunc
 
-func hasWindowsReservedPathColon(_ []byte, _ bool) bool {
+func hasWindowsReservedPath(_ []byte, _ bool) bool {
 	return false
 }

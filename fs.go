@@ -279,9 +279,10 @@ type PathRewriteFunc func(ctx *RequestCtx) []byte
 func NewVHostPathRewriter(slashesCount int) PathRewriteFunc {
 	return func(ctx *RequestCtx) []byte {
 		path := stripLeadingSlashes(ctx.Path(), slashesCount)
-		// On Windows ctx.Path() may keep a '..' segment, e.g. from `/a/..\../`.
-		// Return it unchanged so FS rejects it instead of letting the second
-		// normalization below remove the host segment.
+		if len(path) == 0 {
+			path = strSlash
+		}
+		// Leave parent segments for FS to reject before prepending the host.
 		if hasDotDotPathSegment(path) {
 			return path
 		}
@@ -359,7 +360,8 @@ func pathRewriteKeepsURI(f PathRewriteFunc) bool {
 }
 
 // FS represents settings for request handler serving static files
-// from the local filesystem.
+// from the local filesystem. On Windows, the default filesystem rejects names
+// ending in a space or period to prevent access under an alternate spelling.
 //
 // It is prohibited copying FS values. Create new values instead.
 type FS struct {
@@ -1500,20 +1502,17 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		ctx.Error("Are you a hacker?", StatusBadRequest)
 		return
 	}
-	// Prevent request paths from reaching NTFS alternate data streams through
-	// the default osFS. Custom filesystems may define their own colon syntax.
-	if _, ok := h.filesystem.(*osFS); ok && hasWindowsReservedPathColon(path, h.root == "") {
-		ctx.Logger().Printf("cannot serve path with a Windows-reserved ':' character: %q", path)
+	// Custom filesystems define their own path syntax.
+	if _, ok := h.filesystem.(*osFS); ok && hasWindowsReservedPath(path, h.root == "") {
+		ctx.Logger().Printf("cannot serve Windows-reserved path: %q", path)
 		ctx.Error("Forbidden", StatusForbidden)
 		return
 	}
 
 	// Rewritten paths bypass ctx.Path()'s normalization, so they must be
-	// checked for '..' segments here. On Windows every path is checked
-	// regardless: ctx.Path() normalization only treats '/' as a separator,
-	// so backslash traversal such as `\..\` and `\../` survives it and
-	// filepath.FromSlash later turns it into a real parent-directory jump
-	// (https://github.com/valyala/fasthttp/issues/1691).
+	// checked for '..' segments here. On Windows also check normalized paths
+	// before handing them to a filesystem that accepts both separators.
+	// See https://github.com/valyala/fasthttp/issues/1691.
 	if h.pathRewrite != nil || filepath.Separator == '\\' {
 		if hasDotDotPathSegment(path) {
 			ctx.Logger().Printf("cannot serve path with '..' path segment due to security reasons: %q", path)
@@ -1522,7 +1521,6 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		}
 	}
 
-	mustCompress := false
 	fileCacheKind := defaultCacheKind
 	fileEncoding := ""
 	var byteRange []byte
@@ -1534,15 +1532,12 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	if len(byteRange) == 0 && h.compress {
 		switch {
 		case h.compressBrotli && ctx.Request.Header.HasAcceptEncodingBytes(strBr):
-			mustCompress = true
 			fileCacheKind = brotliCacheKind
 			fileEncoding = "br"
 		case h.compressZstd && ctx.Request.Header.HasAcceptEncodingBytes(strZstd):
-			mustCompress = true
 			fileCacheKind = zstdCacheKind
 			fileEncoding = "zstd"
 		case ctx.Request.Header.HasAcceptEncodingBytes(strGzip):
-			mustCompress = true
 			fileCacheKind = gzipCacheKind
 			fileEncoding = "gzip"
 		}
@@ -1573,43 +1568,27 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	ff, ok := h.cacheManager.GetFileFromCache(fileCacheKind, cacheKey)
 	if !ok {
 		filePath := h.pathToFilePath(path, hasTrailingSlash)
-
+		var status int
 		var err error
-		ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
-		if mustCompress && err == errNoCreatePermission {
-			ctx.Logger().Printf("insufficient permissions for saving compressed file for %q. Serving uncompressed file. "+
-				"Allow write access to the directory with this file in order to improve fasthttp performance", filePath)
-			mustCompress = false
-			ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
-		}
-
-		if errors.Is(err, errDirIndexRequired) {
-			if !clientSlash {
-				redirectToDir(ctx, uriSchemeHost, uriPath, uriQuery)
-				return
-			}
-			ff, err = h.openIndexFile(ctx, filePath, mustCompress, fileEncoding)
-			if err != nil {
-				ctx.Logger().Printf("cannot open dir index %q: %v", filePath, err)
-				ctx.Error("Directory index is forbidden", StatusForbidden)
-				return
-			}
-		} else if err != nil {
+		ff, status, err = h.openAndCacheFile(ctx, path, cacheKey, filePath, hasTrailingSlash, clientSlash, fileCacheKind, fileEncoding)
+		switch status {
+		case StatusFound:
+			redirectToDir(ctx, uriSchemeHost, uriPath, uriQuery)
+			return
+		case StatusForbidden:
+			ctx.Logger().Printf("cannot open dir index %q: %v", filePath, err)
+			ctx.Error("Directory index is forbidden", status)
+			return
+		case StatusNotFound:
 			ctx.Logger().Printf("cannot open file %q: %v", filePath, err)
 			if h.pathNotFound == nil {
-				ctx.Error("Cannot open requested path", StatusNotFound)
+				ctx.Error("Cannot open requested path", status)
 			} else {
-				ctx.SetStatusCode(StatusNotFound)
+				ctx.SetStatusCode(status)
 				h.pathNotFound(ctx)
 			}
 			return
 		}
-
-		if h.generateETag {
-			ff.etag = appendFSETag(nil, ff.lastModified, ff.contentLength)
-		}
-
-		ff = h.cacheManager.SetFileToCache(fileCacheKind, cacheKey, ff)
 	}
 
 	var notModified bool
@@ -1750,6 +1729,67 @@ func redirectToDir(ctx *RequestCtx, uriSchemeHost, uriPath, uriQuery []byte) {
 	}
 	ctx.RedirectBytes(b.B, StatusFound)
 	bytebufferpool.Put(b)
+}
+
+func (h *fsHandler) openAndCacheFile(
+	ctx *RequestCtx, path, cacheKey []byte, filePath string, hasTrailingSlash, clientSlash bool, kind CacheKind, fileEncoding string,
+) (*fsFile, int, error) {
+	mustCompress := kind != defaultCacheKind
+	if _, onDisk := h.filesystem.(*osFS); !onDisk && mustCompress && !h.skipCache {
+		// In-memory compression has no on-disk copy for a concurrent opener
+		// to reuse. Keep the entry locked until the result is in the cache.
+		key := fmt.Sprintf("%p:%d:%s", h, kind, cacheKey)
+		lock := acquireFileLock(key)
+		lock.mu.Lock()
+		defer func() {
+			lock.mu.Unlock()
+			releaseFileLock(key, lock)
+		}()
+		if ff, ok := h.cacheManager.GetFileFromCache(kind, cacheKey); ok {
+			return ff, StatusOK, nil
+		}
+	}
+
+	var ff *fsFile
+	var err error
+	if hasTrailingSlash && len(path) > 1 {
+		// A slash after a name requires a directory, even if a compressed
+		// copy of a regular file exists. FS.Root itself may be a file.
+		var info fs.FileInfo
+		info, err = fs.Stat(h.filesystem, filePath)
+		if err == nil {
+			if info.IsDir() {
+				err = errDirIndexRequired
+			} else {
+				err = fs.ErrNotExist
+			}
+		}
+	} else {
+		ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
+		if mustCompress && err == errNoCreatePermission {
+			ctx.Logger().Printf("insufficient permissions for saving compressed file for %q. Serving uncompressed file. "+
+				"Allow write access to the directory with this file in order to improve fasthttp performance", filePath)
+			mustCompress = false
+			ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
+		}
+	}
+
+	if errors.Is(err, errDirIndexRequired) {
+		if !clientSlash {
+			return nil, StatusFound, err
+		}
+		ff, err = h.openIndexFile(ctx, filePath, mustCompress, fileEncoding)
+		if err != nil {
+			return nil, StatusForbidden, err
+		}
+	} else if err != nil {
+		return nil, StatusNotFound, err
+	}
+
+	if h.generateETag {
+		ff.etag = appendFSETag(nil, ff.lastModified, ff.contentLength)
+	}
+	return h.cacheManager.SetFileToCache(kind, cacheKey, ff), StatusOK, nil
 }
 
 // fsIfRangeMatch reports whether the Range header may be served given
@@ -2146,13 +2186,19 @@ func (h *fsHandler) compressAndOpenFSFile(filePath, fileEncoding string) (*fsFil
 func (h *fsHandler) compressFileNolock(
 	cache osRoot, f fs.File, fileInfo fs.FileInfo, filePath, compressedFilePath, fileEncoding string,
 ) (*fsFile, error) {
-	// Attempt to open compressed file created by another concurrent
-	// goroutine.
-	// It is safe opening such a file, since the file creation
-	// is guarded by file mutex - see getFileLock call.
+	// Reuse a fresh copy, including one another goroutine just created.
 	if cached, err := cache.open(compressedFilePath); err == nil {
-		_ = f.Close()
-		return h.newCompressedFSFile(cached, compressedFilePath, fileEncoding)
+		cachedInfo, statErr := cached.Stat()
+		if statErr != nil {
+			_ = cached.Close()
+			_ = f.Close()
+			return nil, fmt.Errorf("cannot stat compressed file %q: %w", compressedFilePath, statErr)
+		}
+		if !compressedFileStale(fileInfo, cachedInfo) {
+			_ = f.Close()
+			return h.newCompressedFSFile(cached, compressedFilePath, fileEncoding)
+		}
+		_ = cached.Close()
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		_ = f.Close()
 		return nil, fmt.Errorf("cannot open compressed file %q: %w", compressedFilePath, err)
@@ -2358,10 +2404,7 @@ func (h *fsHandler) openFSFile(filePath string, mustCompress bool, fileEncoding 
 			return nil, fmt.Errorf("cannot obtain info for original file %q: %w", filePathOriginal, err)
 		}
 
-		// Only re-create the compressed file if there was more than a second between the mod times.
-		// On macOS the gzip seems to truncate the nanoseconds in the mod time causing the original file
-		// to look newer than the gzipped file.
-		if fileInfoOriginal.ModTime().Sub(fileInfo.ModTime()) >= time.Second {
+		if compressedFileStale(fileInfoOriginal, fileInfo) {
 			// The compressed file became stale. Re-create it.
 			_ = f.Close()
 			// Only remove it from the OS filesystem. A custom FS.FS is
@@ -2375,6 +2418,11 @@ func (h *fsHandler) openFSFile(filePath string, mustCompress bool, fileEncoding 
 	}
 
 	return h.newFSFile(f, fileInfo, mustCompress, filePath, fileEncoding)
+}
+
+// Allow for compressed copies whose modification time lost subsecond precision.
+func compressedFileStale(original, compressed fs.FileInfo) bool {
+	return original.ModTime().Sub(compressed.ModTime()) >= time.Second
 }
 
 func (h *fsHandler) newFSFile(f fs.File, fileInfo fs.FileInfo, compressed bool, filePath, fileEncoding string) (*fsFile, error) {

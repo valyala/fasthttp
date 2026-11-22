@@ -16,6 +16,34 @@ import (
 	"github.com/valyala/bytebufferpool"
 )
 
+func TestCompressHandlerZstdLevel(t *testing.T) {
+	t.Parallel()
+
+	var body []byte
+	for i := range 1000 {
+		body = fmt.Appendf(body, "event=%d type=%d\n", i, i%5)
+	}
+	h := func(ctx *RequestCtx) { ctx.Response.SetBody(body) }
+	for _, level := range []int{CompressBestSpeed, 3, 4, CompressBestCompression} {
+		wantLevel := CompressZstdDefault
+		if level == CompressBestSpeed {
+			wantLevel = CompressZstdBestSpeed
+		}
+		want := AppendZstdBytesLevel(nil, body, wantLevel)
+		for name, handler := range map[string]RequestHandler{
+			"standard": CompressHandlerLevel(h, level),
+			"brotli":   CompressHandlerBrotliLevel(h, CompressBrotliDefaultCompression, level),
+		} {
+			var ctx RequestCtx
+			ctx.Request.Header.Set("Accept-Encoding", "zstd")
+			handler(&ctx)
+			if !bytes.Equal(ctx.Response.Body(), want) {
+				t.Errorf("%s handler at level %d: expected zstd level %d", name, level, wantLevel)
+			}
+		}
+	}
+}
+
 func TestZstdBytesSerial(t *testing.T) {
 	t.Parallel()
 

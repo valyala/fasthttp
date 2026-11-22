@@ -102,7 +102,8 @@ func DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 
 // DoRedirects performs the given http request and fills the given http response,
 // following up to maxRedirectsCount redirects. When the redirect count exceeds
-// maxRedirectsCount, ErrTooManyRedirects is returned.
+// maxRedirectsCount, ErrTooManyRedirects is returned. A redirect error closes
+// the body stream of the redirect response.
 //
 // Request must contain at least non-zero RequestURI with full url (including
 // scheme and host) or non-zero Host header + RequestURI.
@@ -123,11 +124,7 @@ func DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 // The response body size is not limited. Use a Client or HostClient with a
 // positive MaxResponseBodySize when requesting untrusted servers.
 func DoRedirects(req *Request, resp *Response, maxRedirectsCount int) error {
-	if defaultClient.DisablePathNormalizing {
-		req.URI().DisablePathNormalizing = true
-	}
-	_, _, err := doRequestFollowRedirects(req, resp, req.URI().String(), maxRedirectsCount, &defaultClient)
-	return err
+	return defaultClient.DoRedirects(req, resp, maxRedirectsCount)
 }
 
 // Get returns the status code and body of url.
@@ -289,7 +286,8 @@ type Client struct {
 
 	// Maximum duration for full response reading (including body).
 	// When response streaming is enabled, the deadline remains active while
-	// the caller reads Response.BodyStream.
+	// the caller reads Response.BodyStream. When WriteTimeout is unset,
+	// ReadTimeout also limits the TLS handshake on a new connection.
 	//
 	// If a request timeout is set, the shorter timeout applies.
 	//
@@ -501,7 +499,8 @@ func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) er
 
 // DoRedirects performs the given http request and fills the given http response,
 // following up to maxRedirectsCount redirects. When the redirect count exceeds
-// maxRedirectsCount, ErrTooManyRedirects is returned.
+// maxRedirectsCount, ErrTooManyRedirects is returned. A redirect error closes
+// the body stream of the redirect response.
 //
 // Request must contain at least non-zero RequestURI with full url (including
 // scheme and host) or non-zero Host header + RequestURI.
@@ -519,11 +518,7 @@ func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) er
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *Client) DoRedirects(req *Request, resp *Response, maxRedirectsCount int) error {
-	if c.DisablePathNormalizing {
-		req.URI().DisablePathNormalizing = true
-	}
-	_, _, err := doRequestFollowRedirects(req, resp, req.URI().String(), maxRedirectsCount, c)
-	return err
+	return doRedirects(req, resp, maxRedirectsCount, c, c.DisablePathNormalizing)
 }
 
 // Do performs the given http request and fills the given http response.
@@ -546,10 +541,10 @@ func (c *Client) DoRedirects(req *Request, resp *Response, maxRedirectsCount int
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *Client) Do(req *Request, resp *Response) error {
-	uri := req.URI()
-	if uri == nil {
-		return ErrorInvalidURI
+	if err := req.parseURI(); err != nil {
+		return err
 	}
+	uri := &req.uri
 
 	host := uri.Host()
 
@@ -914,7 +909,8 @@ type HostClient struct {
 
 	// Maximum duration for full response reading (including body).
 	// When response streaming is enabled, the deadline remains active while
-	// the caller reads Response.BodyStream.
+	// the caller reads Response.BodyStream. When WriteTimeout is unset,
+	// ReadTimeout also limits the TLS handshake on a new connection.
 	//
 	// If a request timeout is set, the shorter timeout applies.
 	//
@@ -1063,6 +1059,7 @@ type clientConn struct {
 	// never set.
 	readDeadlineSet  bool
 	writeDeadlineSet bool
+	firstRequest     bool
 }
 
 // Conn returns the underlying net.Conn associated with the client connection.
@@ -1160,6 +1157,20 @@ type clientURLResponse struct {
 	statusCode int
 }
 
+// deadlineClient applies the remaining time budget to each redirect.
+type deadlineClient struct {
+	client   clientDoer
+	deadline time.Time
+}
+
+func (c *deadlineClient) Do(req *Request, resp *Response) error {
+	req.timeout = time.Until(c.deadline)
+	if req.timeout <= 0 {
+		return ErrTimeout
+	}
+	return c.client.Do(req, resp)
+}
+
 func clientGetURLDeadline(dst []byte, url string, deadline time.Time, c clientDoer) (statusCode int, body []byte, err error) {
 	timeout := time.Until(deadline)
 	if timeout <= 0 {
@@ -1173,24 +1184,23 @@ func clientGetURLDeadline(dst []byte, url string, deadline time.Time, c clientDo
 	}
 	ch = chv.(chan clientURLResponse) //nolint:forcetypeassert
 
-	// Note that the request continues execution on ErrTimeout until
-	// client-specific ReadTimeout exceeds. This helps limiting load
-	// on slow hosts by MaxConns* concurrent requests.
-	//
-	// Without this 'hack' the load on slow host could exceed MaxConns*
-	// concurrent requests, since timed out requests on client side
-	// usually continue execution on the host.
-
+	// A custom dialer or transport may ignore the timeout. Keep the worker
+	// independent of dst once the caller has returned.
 	var mu sync.Mutex
 	var timedout, responded bool
 
 	go func() {
 		req := AcquireRequest()
 
-		statusCodeCopy, bodyCopy, errCopy := doRequestFollowRedirectsBuffer(req, nil, url, c)
+		dc := deadlineClient{client: c, deadline: deadline}
+		statusCodeCopy, bodyCopy, errCopy := doRequestFollowRedirectsBuffer(req, nil, url, &dc)
 		mu.Lock()
 		if !timedout {
-			bodyCopy = append(dst[:0], bodyCopy...)
+			if errCopy == ErrTimeout && !time.Now().Before(deadline) {
+				statusCodeCopy, bodyCopy = 0, dst
+			} else {
+				bodyCopy = append(dst[:0], bodyCopy...)
+			}
 			ch <- clientURLResponse{
 				statusCode: statusCodeCopy,
 				body:       bodyCopy,
@@ -1321,6 +1331,21 @@ func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clie
 	return statusCode, body, err
 }
 
+func doRedirects(req *Request, resp *Response, maxRedirectsCount int, c clientDoer, disablePathNormalizing bool) error {
+	if timeout := req.timeout; timeout > 0 {
+		c = &deadlineClient{client: c, deadline: time.Now().Add(timeout)}
+		defer func() { req.timeout = timeout }()
+	}
+	if err := req.parseURI(); err != nil {
+		return err
+	}
+	if disablePathNormalizing {
+		req.uri.DisablePathNormalizing = true
+	}
+	_, _, err := doRequestFollowRedirects(req, resp, req.uri.String(), maxRedirectsCount, c)
+	return err
+}
+
 func doRequestFollowRedirects(
 	req *Request, resp *Response, url string, maxRedirectsCount int, c clientDoer,
 ) (statusCode int, body []byte, err error) {
@@ -1340,17 +1365,12 @@ func doRequestFollowRedirects(
 			return 0, nil, err
 		}
 
-		// Write builds Authorization from the userinfo when the request
-		// doesn't have one. Like net/http, that header is only for this URI:
-		// it is built again from the userinfo of the next one on a redirect.
-		authFromUserinfo := len(req.uri.username) > 0 && len(req.Header.peek(strAuthorization)) == 0
-
 		if err = c.Do(req, resp); err != nil {
-			break
+			return statusCode, body, err
 		}
 		statusCode = resp.Header.StatusCode()
 		if !StatusCodeIsRedirect(statusCode) {
-			break
+			return statusCode, body, err
 		}
 
 		redirectsCount++
@@ -1367,7 +1387,7 @@ func doRequestFollowRedirects(
 			// There is nothing to fetch for mailto:, tel: or an app callback
 			// such as com.example.app:/cb, so return the redirect response
 			// as is and leave the location to the caller.
-			break
+			return statusCode, body, err
 		}
 		redirectURI := AcquireURI()
 		url, err = getRedirectURL(url, location, req.DisableRedirectPathNormalizing, redirectURI)
@@ -1378,9 +1398,6 @@ func doRequestFollowRedirects(
 			break
 		}
 		stripSensitiveHeadersOnRedirect(req, initialHost, redirectURI)
-		if authFromUserinfo {
-			req.Header.del(strAuthorization)
-		}
 		// A relative location keeps the userinfo of the current URI, while
 		// an absolute one only has its own, as with url.URL.ResolveReference.
 		if !hasAuthority(location) {
@@ -1411,7 +1428,7 @@ func doRequestFollowRedirects(
 
 		if err = closeOrDrainResponseBody(resp, maxResponseBodyDrainSize); err != nil {
 			ReleaseURI(redirectURI)
-			break
+			return statusCode, body, err
 		}
 
 		// Set the URI here and not at the top of the loop: DoRedirects
@@ -1426,6 +1443,8 @@ func doRequestFollowRedirects(
 		ReleaseURI(redirectURI)
 	}
 
+	// Discard the failed redirect without waiting for more body bytes.
+	_ = resp.CloseBodyStream()
 	return statusCode, body, err
 }
 
@@ -1678,7 +1697,8 @@ func (c *HostClient) DoDeadline(req *Request, resp *Response, deadline time.Time
 
 // DoRedirects performs the given http request and fills the given http response,
 // following up to maxRedirectsCount redirects. When the redirect count exceeds
-// maxRedirectsCount, ErrTooManyRedirects is returned.
+// maxRedirectsCount, ErrTooManyRedirects is returned. A redirect error closes
+// the body stream of the redirect response.
 //
 // Request must contain at least non-zero RequestURI with full url (including
 // scheme and host) or non-zero Host header + RequestURI.
@@ -1696,11 +1716,7 @@ func (c *HostClient) DoDeadline(req *Request, resp *Response, deadline time.Time
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *HostClient) DoRedirects(req *Request, resp *Response, maxRedirectsCount int) error {
-	if c.DisablePathNormalizing {
-		req.URI().DisablePathNormalizing = true
-	}
-	_, _, err := doRequestFollowRedirects(req, resp, req.URI().String(), maxRedirectsCount, c)
-	return err
+	return doRedirects(req, resp, maxRedirectsCount, c, c.DisablePathNormalizing)
 }
 
 // Do performs the given http request and sets the corresponding response.
@@ -1846,7 +1862,10 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	req.secureErrorLogMessage = c.SecureErrorLogMessage
 	req.Header.secureErrorLogMessage = c.SecureErrorLogMessage
 
-	if c.IsTLS != req.URI().isHTTPS() {
+	if err := req.parseURI(); err != nil {
+		return false, err
+	}
+	if c.IsTLS != req.uri.isHTTPS() {
 		return false, ErrHostClientRedirectToDifferentScheme
 	}
 
@@ -1868,7 +1887,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	resp.StreamBody = customStreamBody
 	resp.Header.noDefaultContentType = customNoDefaultContentType
 
-	req.URI().DisablePathNormalizing = c.DisablePathNormalizing
+	req.uri.DisablePathNormalizing = c.DisablePathNormalizing
 
 	userAgentOld := req.Header.UserAgent()
 	if len(userAgentOld) == 0 {
@@ -2250,6 +2269,7 @@ func acquireClientConn(conn net.Conn) *clientConn {
 	cc := v.(*clientConn) //nolint:forcetypeassert
 	cc.c = conn
 	cc.createdTime = time.Now()
+	cc.firstRequest = true
 	cc.readDeadlineSet = true
 	cc.writeDeadlineSet = true
 	return cc
@@ -2434,7 +2454,12 @@ func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err
 	if timeout <= 0 {
 		timeout = DefaultDialTimeout
 	}
-	deadline := time.Now().Add(timeout)
+	now := time.Now()
+	deadline := now.Add(timeout)
+	var requestDeadline time.Time
+	if dialTimeout > 0 {
+		requestDeadline = now.Add(dialTimeout)
+	}
 	for n > 0 {
 		addr := c.nextAddr()
 		var tlsConfig *tls.Config
@@ -2443,6 +2468,12 @@ func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err
 			if err != nil {
 				n--
 				continue
+			}
+		}
+		if !requestDeadline.IsZero() {
+			dialTimeout = time.Until(requestDeadline)
+			if dialTimeout <= 0 {
+				return nil, ErrTimeout
 			}
 		}
 		conn, err = dialAddr(addr, c.Dial, c.DialTimeout, c.DialDualStack, c.IsTLS, tlsConfig, dialTimeout, c.WriteTimeout)
@@ -2509,7 +2540,11 @@ func dialAddr(
 	addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialDualStack, isTLS bool,
 	tlsConfig *tls.Config, dialTimeout, writeTimeout time.Duration,
 ) (net.Conn, error) {
-	deadline := time.Now().Add(writeTimeout)
+	handshakeTimeout := writeTimeout
+	if dialTimeout > 0 && dialTimeout < handshakeTimeout {
+		handshakeTimeout = dialTimeout
+	}
+	deadline := time.Now().Add(handshakeTimeout)
 	conn, err := callDialFunc(addr, dial, dialWithTimeout, dialDualStack, isTLS, dialTimeout)
 	if err != nil {
 		return nil, err
@@ -2966,12 +3001,15 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 		return err
 	}
 
+	if c.DisablePathNormalizing {
+		if err := req.parseURI(); err != nil {
+			return err
+		}
+		req.uri.DisablePathNormalizing = true
+	}
+
 	chs := c.acquirePipelineConnChannels()
 	defer c.releasePipelineConnChannels(chs)
-
-	if c.DisablePathNormalizing {
-		req.URI().DisablePathNormalizing = true
-	}
 
 	userAgentOld := req.Header.UserAgent()
 	if len(userAgentOld) == 0 {
@@ -3117,12 +3155,15 @@ func (c *pipelineConnClient) Do(req *Request, resp *Response) error {
 		return err
 	}
 
+	if c.DisablePathNormalizing {
+		if err := req.parseURI(); err != nil {
+			return err
+		}
+		req.uri.DisablePathNormalizing = true
+	}
+
 	chs := c.acquirePipelineConnChannels()
 	defer c.releasePipelineConnChannels(chs)
-
-	if c.DisablePathNormalizing {
-		req.URI().DisablePathNormalizing = true
-	}
 
 	userAgentOld := req.Header.UserAgent()
 	if len(userAgentOld) == 0 {
@@ -3464,11 +3505,7 @@ func (c *pipelineConnClient) writer(
 				return err
 			}
 		}
-		if err = w.req.Write(bw); err != nil {
-			w.err = err
-			w.done <- struct{}{}
-			return err
-		}
+		started, writeErr := w.req.write(bw)
 		if flushTimerCh == nil && (len(chW) == 0 || len(chR) == cap(chR)) {
 			if maxBatchDelay > 0 {
 				flushTimer.Reset(maxBatchDelay)
@@ -3476,6 +3513,16 @@ func (c *pipelineConnClient) writer(
 			} else {
 				flushTimerCh = instantTimerCh
 			}
+		}
+
+		if writeErr != nil {
+			w.err = writeErr
+			w.done <- struct{}{}
+			if started {
+				return writeErr
+			}
+			// The scheduled flush still covers requests buffered before this one.
+			continue
 		}
 
 	againChR:
@@ -3710,6 +3757,35 @@ func (s *clientStreamBody) CloseWithError(err error) error {
 	return nil
 }
 
+func clientDeadline(requestDeadline time.Time, timeout time.Duration) time.Time {
+	if timeout > 0 {
+		deadline := time.Now().Add(timeout)
+		if requestDeadline.IsZero() || deadline.Before(requestDeadline) {
+			return deadline
+		}
+	}
+	return requestDeadline
+}
+
+// A connection can reach the pool before its TLS handshake. Complete the
+// handshake under the first request's deadline before reading its body.
+func (cc *clientConn) handshake(deadline time.Time) error {
+	conn, ok := cc.c.(interface{ Handshake() error })
+	if !ok {
+		return nil
+	}
+	if err := cc.c.SetDeadline(deadline); err != nil {
+		return err
+	}
+	cc.readDeadlineSet = true
+	cc.writeDeadlineSet = true
+	err := conn.Handshake()
+	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		return ErrTimeout
+	}
+	return err
+}
+
 func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (retry bool, err error) {
 	customSkipBody := resp.SkipBody
 	customStreamBody := resp.StreamBody
@@ -3727,11 +3803,18 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 
 	resp.ParseNetConn(conn)
 
-	writeDeadline := deadline
-	if hc.WriteTimeout > 0 {
-		tmpWriteDeadline := time.Now().Add(hc.WriteTimeout)
-		if writeDeadline.IsZero() || tmpWriteDeadline.Before(writeDeadline) {
-			writeDeadline = tmpWriteDeadline
+	writeDeadline := clientDeadline(deadline, hc.WriteTimeout)
+	if cc.firstRequest {
+		cc.firstRequest = false
+		if hc.IsTLS && (hc.ReadTimeout > 0 || !writeDeadline.IsZero()) {
+			handshakeDeadline := writeDeadline
+			if hc.WriteTimeout == 0 {
+				handshakeDeadline = clientDeadline(deadline, hc.ReadTimeout)
+			}
+			if err = cc.handshake(handshakeDeadline); err != nil {
+				hc.CloseConn(cc)
+				return true, err
+			}
 		}
 	}
 
@@ -3743,14 +3826,14 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		cc.writeDeadlineSet = !writeDeadline.IsZero()
 	}
 
-	resetConnection := false
-	if hc.MaxConnDuration > 0 && time.Since(cc.createdTime) > hc.MaxConnDuration && !req.ConnectionClose() {
+	expired := hc.MaxConnDuration > 0 && time.Since(cc.createdTime) > hc.MaxConnDuration
+	resetConnection := expired && !req.ConnectionClose()
+	if resetConnection {
 		req.SetConnectionClose()
-		resetConnection = true
 	}
 
 	bw := hc.AcquireWriter(conn)
-	err = req.Write(bw)
+	started, err := req.write(bw)
 
 	if resetConnection {
 		req.Header.ResetConnectionClose()
@@ -3767,18 +3850,15 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	}
 
 	if err != nil {
-		hc.CloseConn(cc)
-		return true, err
-	}
-
-	readDeadline := deadline
-	if hc.ReadTimeout > 0 {
-		tmpReadDeadline := time.Now().Add(hc.ReadTimeout)
-		if readDeadline.IsZero() || tmpReadDeadline.Before(readDeadline) {
-			readDeadline = tmpReadDeadline
+		if started || expired {
+			hc.CloseConn(cc)
+		} else {
+			hc.releaseConn(cc)
 		}
+		return started, err
 	}
 
+	readDeadline := clientDeadline(deadline, hc.ReadTimeout)
 	if !readDeadline.IsZero() || cc.readDeadlineSet {
 		if err = conn.SetReadDeadline(readDeadline); err != nil {
 			hc.CloseConn(cc)

@@ -54,6 +54,7 @@ type Request struct {
 
 	multipartForm         *multipart.Form
 	multipartFormBoundary string
+	preParsedFormSize     int // Original body size when preReadMultipartForm parsed the form.
 
 	postArgs   Args
 	userValues userData
@@ -237,7 +238,7 @@ func (req *Request) SetRequestURIBytes(requestURI []byte) {
 // return an empty value. Use req.URI().RequestURI() when the parsed URI and its
 // host must remain available.
 func (req *Request) RequestURI() []byte {
-	if req.parsedURI {
+	if req.parsedURI && req.uriParseErr == nil {
 		requestURI := req.requestURIFromURI()
 		req.SetRequestURIBytes(requestURI)
 	}
@@ -246,12 +247,10 @@ func (req *Request) RequestURI() []byte {
 
 // requestURIFromURI returns the request target rebuilt from the parsed URI.
 //
-// The target of a CONNECT request names the authority to tunnel to rather
-// than a path (RFC 9112, Section 3.2.3), so it is rebuilt without path
-// normalization, which would turn the authority-form "example.com:443" into
-// the origin-form "/example.com:443".
+// Preserve a CONNECT authority (RFC 9112, Section 3.2.3), since adding a
+// leading slash would turn it into a path. Normalize path targets as usual.
 func (req *Request) requestURIFromURI() []byte {
-	return req.uri.requestURIBytes(req.uri.DisablePathNormalizing || req.Header.IsConnect())
+	return req.uri.requestURIBytes(req.uri.DisablePathNormalizing || (req.Header.IsConnect() && req.uri.isConnectAuthority()))
 }
 
 // StatusCode returns response status code.
@@ -1270,7 +1269,7 @@ func (req *Request) parsePostArgs() {
 	}
 	req.parsedPostArgs = true
 
-	if !caseInsensitiveHasPrefix(req.Header.ContentType(), strPostArgsContentType) {
+	if !hasMediaType(req.Header.ContentType(), strPostArgsContentType) {
 		return
 	}
 	req.postArgs.ParseBytes(req.bodyBytes())
@@ -1297,7 +1296,9 @@ func (req *Request) MultipartForm() (*multipart.Form, error) {
 // MultipartFormWithLimit returns request's multipart form and limits the
 // read multipart body size to maxBodySize bytes.
 //
-// If maxBodySize <= 0, then no limit is applied.
+// If the server already parsed the form, the limit applies to the original
+// body size. Set Server.DisablePreParseMultipartForm to enforce the limit
+// during parsing. If maxBodySize <= 0, then no limit is applied.
 //
 // Returns ErrNoMultipartForm if request's Content-Type
 // isn't 'multipart/form-data'.
@@ -1306,6 +1307,9 @@ func (req *Request) MultipartForm() (*multipart.Form, error) {
 // is processed.
 func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, error) {
 	if req.multipartForm != nil {
+		if maxBodySize > 0 && req.preParsedFormSize > maxBodySize {
+			return nil, fmt.Errorf("cannot read multipart/form-data body: %w", ErrBodyTooLarge)
+		}
 		return req.multipartForm, nil
 	}
 
@@ -1335,7 +1339,7 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 	// mid-body, and the server's stream records that itself, see
 	// requestStream.failed, where Request.Reset can't clear it.
 	var drainBodyStream bool
-	if req.bodyStream != nil && isMultipartFormData(req.Header.ContentType()) {
+	if req.bodyStream != nil && hasMediaType(req.Header.ContentType(), strMultipartFormData) {
 		defer func() {
 			if drainBodyStream {
 				copyBodyStream(io.Discard, req.bodyStream) //nolint:errcheck
@@ -1427,15 +1431,12 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 	return req.multipartForm, nil
 }
 
-// isMultipartFormData reports whether contentType declares the
-// multipart/form-data media type, with or without parameters. A plain prefix
-// match would also take media types such as multipart/form-data-alt, whose
-// body the multipart parser never reads.
-func isMultipartFormData(contentType []byte) bool {
-	if !caseInsensitiveHasPrefix(contentType, strMultipartFormData) {
+// hasMediaType matches the media type in Content-Type, ignoring parameters.
+func hasMediaType(contentType, mediaType []byte) bool {
+	if !caseInsensitiveHasPrefix(contentType, mediaType) {
 		return false
 	}
-	rest := contentType[len(strMultipartFormData):]
+	rest := contentType[len(mediaType):]
 	for len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t') {
 		rest = rest[1:]
 	}
@@ -1482,6 +1483,54 @@ func (w *multipartFileWriter) Write(p []byte) (int, error) {
 		rest = rest[i+1:]
 	}
 	return w.w.Write(p)
+}
+
+// multipartFormBoundaryWritable reports whether WriteMultipartForm accepts the
+// boundary, which is to say whether mime/multipart does: 1 to 70 bytes of the
+// characters RFC 2046, section 5.1.1 allows, and no space at the end.
+//
+// A form that is parsed as the request is read is marshaled again when the
+// request is written, and the Content-Type of a request can have a boundary
+// that doesn't qualify although net/http reads it, such as "foo;bar" or one
+// with a quote or a backslash in it. Writing such a request would fail, and
+// Body would return the error text as the body, so the body of such a request
+// is kept as it is instead, and written as it came. MultipartForm still parses
+// it from the body when it is asked for.
+func multipartFormBoundaryWritable(boundary string) bool {
+	// SetBoundary only checks the boundary and stores it. A Writer from
+	// NewWriter would also pick a random boundary first, from crypto/rand.
+	var mw multipart.Writer
+	return mw.SetBoundary(boundary) == nil
+}
+
+// preReadMultipartForm reads the body of a multipart/form-data request of known
+// length as a form, and reports whether it did. This way we limit memory usage
+// for large file uploads, since their contents is streamed into temporary files
+// if file size exceeds defaultMaxInMemoryFileSize.
+//
+// The body is left unread, to be kept as it is, when the request has no
+// boundary, has a Content-Encoding, or has a boundary that mime/multipart can't
+// write again, since the form is marshaled again with it when the request is
+// written.
+//
+// The boundary is copied, since Write replaces the Content-Type it is read from.
+func (req *Request) preReadMultipartForm(r *bufio.Reader, contentLength int) (read bool, err error) {
+	req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
+
+	// The cheap conditions come first: asking SetBoundary about the empty
+	// boundary of a body that isn't multipart allocates an error each time.
+	if req.multipartFormBoundary == "" || len(req.Header.peek(strContentEncoding)) != 0 ||
+		!multipartFormBoundaryWritable(req.multipartFormBoundary) {
+		return false, nil
+	}
+
+	req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, defaultMaxInMemoryFileSize)
+	if err != nil {
+		req.Reset()
+	} else {
+		req.preParsedFormSize = contentLength
+	}
+	return true, err
 }
 
 // WriteMultipartForm writes the given multipart form f with the given
@@ -1607,6 +1656,7 @@ func (req *Request) RemoveMultipartFormFiles() {
 		// to new places by user code.
 		req.multipartForm.RemoveAll() //nolint:errcheck
 		req.multipartForm = nil
+		req.preParsedFormSize = 0
 	}
 	req.multipartFormBoundary = ""
 }
@@ -1763,16 +1813,8 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseM
 		}
 
 		if len(preParseMultipartForm) == 0 || preParseMultipartForm[0] {
-			// Pre-read multipart form data of known length.
-			// This way we limit memory usage for large file uploads, since their contents
-			// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
-			req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
-			if req.multipartFormBoundary != "" && len(req.Header.peek(strContentEncoding)) == 0 {
-				req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, defaultMaxInMemoryFileSize)
-				if err != nil {
-					req.Reset()
-				}
-				return err
+			if read, perr := req.preReadMultipartForm(r, contentLength); read {
+				return perr
 			}
 		}
 	}
@@ -1845,16 +1887,8 @@ func (req *Request) ContinueReadBodyStream(r *bufio.Reader, maxBodySize int, pre
 	contentLength := req.Header.ContentLength()
 	if contentLength > 0 && (maxBodySize <= 0 || contentLength <= maxBodySize) {
 		if len(preParseMultipartForm) == 0 || preParseMultipartForm[0] {
-			// Pre-read multipart form data of known length.
-			// This way we limit memory usage for large file uploads, since their contents
-			// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
-			req.multipartFormBoundary = b2s(req.Header.MultipartFormBoundary())
-			if req.multipartFormBoundary != "" && len(req.Header.peek(strContentEncoding)) == 0 {
-				req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, defaultMaxInMemoryFileSize)
-				if err != nil {
-					req.Reset()
-				}
-				return err
+			if read, perr := req.preReadMultipartForm(r, contentLength); read {
+				return perr
 			}
 		}
 	}
@@ -2224,39 +2258,26 @@ func (req *Request) onlyMultipartForm() bool {
 //
 // See also WriteTo.
 func (req *Request) Write(w *bufio.Writer) error {
+	_, err := req.write(w)
+	return err
+}
+
+// write reports whether it started writing the request to w.
+func (req *Request) write(w *bufio.Writer) (bool, error) {
 	if len(req.Header.Host()) == 0 || req.parsedURI {
-		uri := req.URI()
-		host := uri.Host()
+		if err := req.parseURI(); err != nil {
+			return false, err
+		}
+		host := req.uri.Host()
 		if len(req.Header.Host()) == 0 {
 			if len(host) == 0 {
-				return errRequestHostRequired
+				return false, errRequestHostRequired
 			}
 			req.Header.SetHostBytes(host)
 		} else if !req.UseHostHeader {
 			req.Header.SetHostBytes(host)
 		}
 		req.Header.SetRequestURIBytes(req.requestURIFromURI())
-
-		// Like net/http, only fill in Authorization from the userinfo
-		// if it hasn't been set already.
-		if len(uri.username) > 0 && len(req.Header.peek(strAuthorization)) == 0 {
-			// RequestHeader.SetBytesKV only uses RequestHeader.bufKV.key
-			// So we are free to use RequestHeader.bufKV.value as a scratch pad for
-			// the base64 encoding.
-			nl := len(uri.username) + len(uri.password) + 1
-			nb := nl + len(strBasicSpace)
-			tl := nb + base64.StdEncoding.EncodedLen(nl)
-			if tl > cap(req.Header.bufV) {
-				req.Header.bufV = make([]byte, 0, tl)
-			}
-			buf := req.Header.bufV[:0]
-			buf = append(buf, uri.username...)
-			buf = append(buf, strColon...)
-			buf = append(buf, uri.password...)
-			buf = append(buf, strBasicSpace...)
-			base64.StdEncoding.Encode(buf[nb:tl], buf[:nl])
-			req.Header.SetBytesKV(strAuthorization, buf[nl:tl])
-		}
 	}
 
 	if req.bodyStream != nil {
@@ -2268,7 +2289,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 	if req.onlyMultipartForm() {
 		body, err = marshalMultipartForm(req.multipartForm, req.multipartFormBoundary)
 		if err != nil {
-			return fmt.Errorf("error when marshaling multipart form: %w", err)
+			return false, fmt.Errorf("error when marshaling multipart form: %w", err)
 		}
 		req.Header.SetMultipartFormBoundary(req.multipartFormBoundary)
 	}
@@ -2284,7 +2305,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 	}
 	if req.Header.disableSpecialHeader {
 		if err = req.Header.setRawBodyFraming(contentLength, hasBody); err != nil {
-			return err
+			return false, err
 		}
 	} else if hasBody || req.Header.contentLength > 0 || len(peekArgBytes(req.Header.h, strTransferEncoding)) > 0 {
 		req.Header.SetContentLength(contentLength)
@@ -2293,26 +2314,65 @@ func (req *Request) Write(w *bufio.Writer) error {
 		if len(body) > 0 && !req.Header.noDefaultContentType && len(req.Header.ContentType()) == 0 {
 			req.Header.SetContentTypeBytes(strDefaultContentType)
 		}
-		if err = req.Header.Write(w); err != nil {
-			return err
+		if err = req.writeHeader(w); err != nil {
+			return true, err
 		}
 		if err = writeBufferedBodyChunked(w, body); err != nil {
-			return err
+			return true, err
 		}
-		return req.Header.writeTrailer(w)
+		return true, req.Header.writeTrailer(w)
 	}
-	if err = req.Header.Write(w); err != nil {
-		return err
+	if err = req.writeHeader(w); err != nil {
+		return true, err
 	}
 	if hasBody {
 		_, err = w.Write(body)
 	} else if len(body) > 0 {
 		if req.secureErrorLogMessage {
-			return errors.New("non-zero body for non-post request")
+			return true, errors.New("non-zero body for non-post request")
 		}
-		return fmt.Errorf("non-zero body for non-post request: body=%q", body)
+		return true, fmt.Errorf("non-zero body for non-post request: body=%q", body)
 	}
-	return err
+	return true, err
+}
+
+// writeHeader adds URL credentials only while serializing this request.
+func (req *Request) writeHeader(w *bufio.Writer) error {
+	if req.parsedURI && len(req.uri.username) > 0 {
+		return req.writeHeaderWithBasicAuth(w)
+	}
+	return req.Header.Write(w)
+}
+
+func (req *Request) writeHeaderWithBasicAuth(w *bufio.Writer) error {
+	h := &req.Header
+	var kv *argsKV
+	for i := range h.h {
+		if bytes.Equal(h.h[i].key, strAuthorization) {
+			kv = &h.h[i]
+			break
+		}
+	}
+	if kv == nil {
+		h.h, kv = allocArg(h.h)
+		kv.key = append(kv.key[:0], strAuthorization...)
+		kv.value = kv.value[:0]
+		defer func() { h.h = releaseArg(h.h) }()
+	} else if len(kv.value) != 0 {
+		return h.Write(w)
+	}
+	kv.value = req.basicAuth(kv.value)
+	defer func() { kv.value = kv.value[:0] }()
+	return h.Write(w)
+}
+
+func (req *Request) basicAuth(dst []byte) []byte {
+	h := &req.Header
+	h.bufV = append(h.bufV[:0], req.uri.username...)
+	h.bufV = append(h.bufV, ':')
+	h.bufV = append(h.bufV, req.uri.password...)
+	dst = append(dst, strBasicSpace...)
+	return base64.StdEncoding.AppendEncode(dst, h.bufV)
 }
 
 // WriteGzip writes response with gzipped body to w.
@@ -2545,7 +2605,8 @@ type compressedBodyStream struct {
 	level      int
 	compress   compressBodyStream
 
-	done chan struct{}
+	done        chan struct{}
+	compressErr error
 
 	startOnce     sync.Once
 	closeReadOnce sync.Once
@@ -2560,10 +2621,30 @@ type compressedBodyStream struct {
 // once the server writes the body, after the headers.
 func (s *compressedBodyStream) Read(p []byte) (int, error) {
 	s.startOnce.Do(func() { s.r = NewStreamReader(s.write) })
+	return s.read(p)
+}
+
+func (s *compressedBodyStream) read(p []byte) (int, error) {
 	if s.r == nil {
 		return 0, io.ErrClosedPipe
 	}
-	return s.r.Read(p)
+	n, err := s.r.Read(p)
+	if err == io.EOF {
+		err = s.terminalError(err)
+	}
+	return n, err
+}
+
+// A concurrent Close can end the pipe before compression finishes.
+func (s *compressedBodyStream) terminalError(err error) error {
+	select {
+	case <-s.done:
+		if s.compressErr != nil {
+			return s.compressErr
+		}
+	default:
+	}
+	return err
 }
 
 func (s *compressedBodyStream) Close() error {
@@ -2593,7 +2674,8 @@ func (s *compressedBodyStream) Close() error {
 }
 
 func (s *compressedBodyStream) write(sw *bufio.Writer) {
-	s.closeErr = s.closeOriginal(s.compress(sw, s.bodyStream, s.level))
+	s.compressErr = s.compress(sw, s.bodyStream, s.level)
+	s.closeErr = s.closeOriginal(s.compressErr)
 	close(s.done)
 }
 
@@ -2833,7 +2915,7 @@ func vectorWriter(c net.Conn) io.Writer {
 	return nil
 }
 
-func (req *Request) writeBodyStream(w *bufio.Writer) error {
+func (req *Request) writeBodyStream(w *bufio.Writer) (bool, error) {
 	var err error
 
 	contentLength := req.Header.ContentLength()
@@ -2858,13 +2940,13 @@ func (req *Request) writeBodyStream(w *bufio.Writer) error {
 	if req.Header.disableSpecialHeader {
 		if err = req.Header.setRawBodyFraming(contentLength, true); err != nil {
 			_ = req.closeBodyStream()
-			return err
+			return false, err
 		}
 	} else if contentLength < 0 {
 		req.Header.SetContentLength(-1)
 	}
 	req.Header.written = true
-	if err = req.Header.Write(w); err == nil {
+	if err = req.writeHeader(w); err == nil {
 		if contentLength >= 0 {
 			err = writeBodyFixedSize(w, req.bodyStream, int64(contentLength), &req.bodyStreamWriter)
 		} else if err = writeBodyChunked(w, req.bodyStream); err == nil {
@@ -2876,7 +2958,7 @@ func (req *Request) writeBodyStream(w *bufio.Writer) error {
 	if err == nil {
 		err = errc
 	}
-	return err
+	return true, err
 }
 
 // ErrBodyStreamWritePanic is returned when panic happens during writing body stream.
@@ -3026,8 +3108,8 @@ func (req *Request) UserValueBytes(key []byte) any {
 // visitor must not retain references to key and value after returning.
 // Make key and/or value copies if you need storing them after returning.
 func (req *Request) VisitUserValues(visitor func([]byte, any)) {
-	for i, n := 0, len(req.userValues); i < n; i++ {
-		kv := &req.userValues[i]
+	for i, n := 0, len(req.userValues.entries); i < n; i++ {
+		kv := &req.userValues.entries[i]
 		if key, ok := kv.key.(string); ok {
 			visitor(s2b(key), kv.value)
 		}
@@ -3039,8 +3121,8 @@ func (req *Request) VisitUserValues(visitor func([]byte, any)) {
 // visitor must not retain references to key and value after returning.
 // Make key and/or value copies if you need storing them after returning.
 func (req *Request) VisitUserValuesAll(visitor func(any, any)) {
-	for i, n := 0, len(req.userValues); i < n; i++ {
-		kv := &req.userValues[i]
+	for i, n := 0, len(req.userValues.entries); i < n; i++ {
+		kv := &req.userValues.entries[i]
 		visitor(kv.key, kv.value)
 	}
 }
@@ -3552,7 +3634,8 @@ func appendBodyFixedSize(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
 	offset := len(dst)
 	dstLen := offset + n
 	if cap(dst) < dstLen {
-		b := make([]byte, roundUpForSliceCap(dstLen))
+		// Leave room for subsequent chunks even above the rounding threshold.
+		b := make([]byte, max(roundUpForSliceCap(dstLen), offset+offset/4))
 		copy(b, dst)
 		dst = b
 	}
@@ -3708,7 +3791,8 @@ func readCrLf(r *bufio.Reader) error {
 	return nil
 }
 
-// SetTimeout sets timeout for the request.
+// SetTimeout sets the timeout for the request. With DoRedirects, the timeout
+// covers the entire redirect chain.
 //
 // If the client has ReadTimeout or WriteTimeout set, the shorter timeout applies.
 //

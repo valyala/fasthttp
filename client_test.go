@@ -2410,6 +2410,44 @@ func TestPipelineClientBuffersStreamBody(t *testing.T) {
 	}
 }
 
+func TestClientKeepsConnAfterRequestSerializationError(t *testing.T) {
+	t.Parallel()
+
+	for _, pipeline := range []bool{false, true} {
+		t.Run(fmt.Sprintf("pipeline=%v", pipeline), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer server.Close()
+
+			addr := server.Listener.Addr().String()
+			var dials atomic.Int32
+			dial := func(addr string) (net.Conn, error) {
+				dials.Add(1)
+				return net.Dial("tcp", addr)
+			}
+			do := (&HostClient{Addr: addr, Dial: dial}).Do
+			if pipeline {
+				do = (&PipelineClient{Addr: addr, Dial: dial}).Do
+			}
+
+			var req Request
+			var resp Response
+			if err := do(&req, &resp); !errors.Is(err, errRequestHostRequired) {
+				t.Fatalf("unexpected error for request without a host: %v", err)
+			}
+			req.Reset()
+			req.SetRequestURI("http://test/")
+			if err := do(&req, &resp); err != nil || resp.StatusCode() != StatusNoContent {
+				t.Fatalf("subsequent request: status %d, err %v", resp.StatusCode(), err)
+			}
+			if n := dials.Load(); n != 1 {
+				t.Fatalf("dialed %d times, want one connection", n)
+			}
+		})
+	}
+}
+
 func TestPipelineClientTimeoutMultipartForm(t *testing.T) {
 	t.Parallel()
 
@@ -2791,21 +2829,37 @@ func TestClientGetWithBody(t *testing.T) {
 func TestClientURLAuth(t *testing.T) {
 	t.Parallel()
 
-	cases := map[string]string{
-		"user:pass@":    "Basic dXNlcjpwYXNz",
-		"user:p%40ss@":  "Basic dXNlcjpwQHNz",
-		"us%20er:pass@": "Basic dXMgZXI6cGFzcw==",
-		"foo:@":         "Basic Zm9vOg==",
-		":@":            "",
-		"@":             "",
-		"":              "",
+	cases := []struct{ userinfo, want string }{
+		{"user:pass@", "Basic dXNlcjpwYXNz"},
+		{"", ""},
+		{"user:p%40ss@", "Basic dXNlcjpwQHNz"},
+		{"us%20er:pass@", "Basic dXMgZXI6cGFzcw=="},
+		{"foo:@", "Basic Zm9vOg=="},
+		{":@", ""},
+		{"@", ""},
 	}
 
-	ch := make(chan string, 1)
 	ln := fasthttputil.NewInmemoryListener()
+	defer ln.Close()
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			ch <- string(ctx.Request.Header.Peek(HeaderAuthorization))
+			auth := ctx.Request.Header.Peek(HeaderAuthorization)
+			switch string(ctx.Path()) {
+			case "/start":
+				ctx.Redirect("http://sub.example.com/trusted", StatusFound)
+			case "/trusted":
+				if len(auth) != 0 {
+					t.Errorf("absolute redirect received authorization %q", auth)
+				}
+				ctx.Redirect("http://other.example/untrusted", StatusFound)
+			case "/untrusted":
+				if len(auth) != 0 {
+					t.Errorf("untrusted redirect received authorization %q", auth)
+				}
+				ctx.Redirect("http://example.com/end", StatusFound)
+			default:
+				ctx.SetBody(auth)
+			}
 		},
 	}
 	go s.Serve(ln) //nolint:errcheck
@@ -2814,19 +2868,21 @@ func TestClientURLAuth(t *testing.T) {
 			return ln.Dial()
 		},
 	}
-	for up, expected := range cases {
-		req := AcquireRequest()
-		req.Header.SetMethod(MethodGet)
-		req.SetRequestURI("http://" + up + "example.com/foo/bar")
-		if err := c.Do(req, nil); err != nil {
+	var req Request
+	var resp Response
+	for i, tc := range cases {
+		req.SetRequestURI(fmt.Sprintf("http://%shost%d.example/foo/bar", tc.userinfo, i))
+		if err := c.Do(&req, &resp); err != nil {
 			t.Fatal(err)
 		}
-
-		val := <-ch
-
-		if val != expected {
-			t.Fatalf("wrong %q header: %q expected %q", HeaderAuthorization, val, expected)
+		if got := string(resp.Body()); got != tc.want {
+			t.Fatalf("request %d: got authorization %q, want %q", i, got, tc.want)
 		}
+	}
+
+	status, body, err := c.Get(nil, "http://user:pass@example.com/start")
+	if err != nil || status != StatusOK || len(body) != 0 {
+		t.Fatalf("return redirect: got status %d, authorization %q, error %v", status, body, err)
 	}
 }
 
@@ -4678,6 +4734,7 @@ func TestClientStreamingRedirectsReuseConnection(t *testing.T) {
 			dialCount.Add(1)
 			return net.Dial("tcp", addr)
 		},
+		MaxConns:           1,
 		StreamResponseBody: true,
 	}
 	t.Cleanup(client.CloseIdleConnections)
@@ -4700,6 +4757,46 @@ func TestClientStreamingRedirectsReuseConnection(t *testing.T) {
 	}
 	if got := dialCount.Load(); got != 1 {
 		t.Fatalf("redirect responses prevented connection reuse: got %d dials", got)
+	}
+
+	// A caller may discard the response when DoRedirects returns an error.
+	for range 2 {
+		req.SetRequestURI(server.URL + "/first")
+		var failed Response
+		if err := client.DoRedirects(&req, &failed, 0); !errors.Is(err, ErrTooManyRedirects) {
+			t.Fatalf("expected redirect limit error, got %v", err)
+		}
+	}
+}
+
+func TestClientsRejectInvalidURI(t *testing.T) {
+	t.Parallel()
+
+	dial := func(string) (net.Conn, error) {
+		return nil, errors.New("unexpected dial")
+	}
+	hc := &HostClient{Addr: "localhost:80", Dial: dial}
+	c := &Client{Dial: dial}
+	pc := &PipelineClient{Addr: "localhost:80", Dial: dial, DisablePathNormalizing: true}
+	for name, do := range map[string]func(*Request, *Response) error{
+		"client":   c.Do,
+		"host":     hc.Do,
+		"pipeline": pc.Do,
+		"pipeline deadline": func(req *Request, resp *Response) error {
+			return pc.DoDeadline(req, resp, time.Now().Add(time.Second))
+		},
+		"redirects": func(req *Request, resp *Response) error {
+			return hc.DoRedirects(req, resp, 1)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var req Request
+			req.Header.SetHost("shop.example:x")
+			req.SetRequestURI("/public/page?id=1")
+			if err := do(&req, nil); err == nil || !strings.Contains(err.Error(), "invalid port") {
+				t.Fatalf("expected invalid port error, got %v", err)
+			}
+		})
 	}
 }
 
@@ -4729,6 +4826,36 @@ func TestClientDoRedirectsAllowsNilResponse(t *testing.T) {
 	if requests != 2 {
 		t.Fatalf("unexpected request count %d; want 2", requests)
 	}
+}
+
+func TestDoRedirectsRequestTimeout(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		const timeout = time.Second
+		var budgets []time.Duration
+		c := HostClient{
+			Addr: "example.com",
+			Transport: &TransportMock{wrapperFunc: func(_ *HostClient, req *Request, resp *Response) (bool, error) {
+				budgets = append(budgets, req.timeout)
+				time.Sleep(timeout / 2)
+				resp.SetStatusCode(StatusFound)
+				resp.Header.Set(HeaderLocation, "/next")
+				return false, nil
+			}},
+		}
+		var req Request
+		req.SetRequestURI("http://example.com/")
+		req.SetTimeout(timeout)
+		if err := c.DoRedirects(&req, nil, 3); err != ErrTimeout {
+			t.Fatalf("got %v, want ErrTimeout", err)
+		}
+		if len(budgets) != 2 || budgets[0] != timeout || budgets[1] != timeout/2 {
+			t.Errorf("hop timeouts = %v, want [%v %v]", budgets, timeout, timeout/2)
+		}
+		if req.timeout != timeout {
+			t.Errorf("request timeout after DoRedirects = %v, want %v", req.timeout, timeout)
+		}
+	})
 }
 
 func TestClientRedirectMethodSwitch(t *testing.T) {
@@ -5461,6 +5588,63 @@ func TestClientGetTimeoutError(t *testing.T) {
 	testClientGetTimeoutError(t, c, 100)
 }
 
+func TestClientGetDeadlineClosesStalledConnection(t *testing.T) {
+	t.Parallel()
+
+	client, peer := net.Pipe()
+	defer peer.Close()
+	c := &HostClient{
+		Addr: "example.com",
+		Dial: func(string) (net.Conn, error) { return client, nil },
+	}
+	closed := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(io.Discard, peer)
+		closed <- err
+	}()
+
+	dst := []byte("original")
+	code, body, err := c.GetDeadline(dst, "http://example.com", time.Now().Add(testTimeout(100*time.Millisecond)))
+	if code != 0 || string(body) != "original" || err != ErrTimeout {
+		t.Fatalf("GetDeadline returned (%d, %q, %v)", code, body, err)
+	}
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("reading stalled connection: %v", err)
+		}
+	case <-time.After(testTimeout(time.Second)):
+		t.Fatal("the client kept the stalled connection open after its deadline")
+	}
+}
+
+func TestClientGetDeadlineSharesBudgetAcrossRedirects(t *testing.T) {
+	t.Parallel()
+
+	var firstTimeout time.Duration
+	c := &HostClient{
+		Addr: "example.com",
+		Transport: &TransportMock{wrapperFunc: func(_ *HostClient, req *Request, resp *Response) (bool, error) {
+			if string(req.URI().Path()) == "/" {
+				firstTimeout = req.timeout
+				time.Sleep(10 * time.Millisecond)
+				resp.SetStatusCode(StatusFound)
+				resp.Header.Set("Location", "/next")
+			} else {
+				if req.timeout <= 0 || req.timeout > firstTimeout-10*time.Millisecond {
+					t.Errorf("redirect timeout %v after first timeout %v", req.timeout, firstTimeout)
+				}
+				resp.SetStatusCode(StatusOK)
+			}
+			return false, nil
+		}},
+	}
+	code, _, err := c.GetTimeout(nil, "http://example.com/", testTimeout(time.Second))
+	if code != StatusOK || err != nil {
+		t.Fatalf("GetTimeout returned status %d and error %v", code, err)
+	}
+}
+
 func TestClientGetURLDeadlineDoesNotMutateDstAfterTimeout(t *testing.T) {
 	t.Parallel()
 
@@ -5471,7 +5655,7 @@ func TestClientGetURLDeadlineDoesNotMutateDstAfterTimeout(t *testing.T) {
 	}
 	dst := []byte("original")
 
-	statusCode, body, err := clientGetURLDeadline(dst, "http://example.com/", time.Now().Add(time.Millisecond), d)
+	statusCode, body, err := clientGetURLDeadline(dst, "http://example.com/", time.Now().Add(testTimeout(100*time.Millisecond)), d)
 	if err != ErrTimeout {
 		t.Fatalf("unexpected error: %v. Expecting %v", err, ErrTimeout)
 	}
@@ -6558,6 +6742,58 @@ func TestClientTLSHandshakeTimeout(t *testing.T) {
 
 	if err != ErrTLSHandshakeTimeout {
 		t.Errorf("resulting error not a timeout: %v\nType %T: %#v", err, err, err)
+	}
+}
+
+func TestClientTLSHandshakeDeadline(t *testing.T) {
+	for _, tc := range []struct {
+		name                                      string
+		readTimeout, writeTimeout, requestTimeout time.Duration
+		want                                      error
+		preconnect                                bool
+	}{
+		{name: "request", requestTimeout: 50 * time.Millisecond, want: ErrTimeout},
+		{name: "read", readTimeout: 50 * time.Millisecond, want: ErrTimeout},
+		{name: "longer write", writeTimeout: time.Minute, requestTimeout: 50 * time.Millisecond, want: ErrTLSHandshakeTimeout},
+		{name: "unused pooled connection", preconnect: true, requestTimeout: 50 * time.Millisecond, want: ErrTimeout},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			client, peer := net.Pipe()
+			defer peer.Close()
+			go func() {
+				_, _ = io.Copy(io.Discard, peer) // Consume ClientHello without responding.
+			}()
+			hc := HostClient{
+				Addr:                      "localhost:443",
+				IsTLS:                     true,
+				ReadTimeout:               tc.readTimeout,
+				WriteTimeout:              tc.writeTimeout,
+				MaxIdemponentCallAttempts: 1,
+				Dial:                      func(string) (net.Conn, error) { return client, nil },
+			}
+			if tc.preconnect {
+				cc, err := hc.AcquireConn(0, false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				hc.ReleaseConn(cc)
+			}
+			var req Request
+			req.SetRequestURI("https://localhost/")
+			req.SetTimeout(tc.requestTimeout)
+			done := make(chan error, 1)
+			go func() { done <- hc.Do(&req, nil) }()
+			select {
+			case err := <-done:
+				if err != tc.want {
+					t.Fatalf("got %v, want %v", err, tc.want)
+				}
+			case <-time.After(2 * time.Second):
+				peer.Close()
+				t.Fatalf("TLS handshake exceeded timeout (returned %v after closing peer)", <-done)
+			}
+		})
 	}
 }
 

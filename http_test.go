@@ -19,6 +19,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/valyala/bytebufferpool"
@@ -2403,8 +2404,8 @@ func TestRequestMultipartFormMediaTypeCase(t *testing.T) {
 				req.RemoveMultipartFormFiles()
 			}
 
-			if !isMultipartFormData([]byte(contentType)) {
-				t.Fatalf("isMultipartFormData(%q) = false; want true", contentType)
+			if !hasMediaType([]byte(contentType), strMultipartFormData) {
+				t.Fatalf("hasMediaType(%q, multipart/form-data) = false; want true", contentType)
 			}
 		})
 	}
@@ -2439,8 +2440,8 @@ func TestRequestMultipartFormOptionalWhitespace(t *testing.T) {
 				req.RemoveMultipartFormFiles()
 			}
 
-			if !isMultipartFormData([]byte(contentType)) {
-				t.Fatalf("isMultipartFormData(%q) = false; want true", contentType)
+			if !hasMediaType([]byte(contentType), strMultipartFormData) {
+				t.Fatalf("hasMediaType(%q, multipart/form-data) = false; want true", contentType)
 			}
 		})
 	}
@@ -2502,6 +2503,53 @@ func TestCopyZeroAllocWithLimit(t *testing.T) {
 	}
 }
 
+func TestRequestMultipartFormBoundaryForwarding(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		params   string
+		boundary string // Boundary used by net/http to read the forwarded request.
+		readForm bool
+	}{
+		{"boundary=back; boundary*=utf-8''front", "front", false},
+		{"boundary=back; BOUNDARY*0=fro; boundary*1=nt", "front", false},
+		{"\u00a0boundary*0=front; boundary=back", "front", false},
+		{"boundary= front", "front", false},
+		{`boundary="foo;bar"`, "foo;bar", true},
+		{`boundary="foo\:bar"`, "foo:bar", true},
+		{`boundary="a\"b"`, `a"b`, true},
+	} {
+		t.Run(tc.params, func(t *testing.T) {
+			body := "--" + tc.boundary + "\r\nContent-Disposition: form-data; name=role\r\n\r\nuser\r\n--" + tc.boundary + "--\r\n"
+			raw := fmt.Sprintf("POST / HTTP/1.1\r\nHost: example.org\r\nContent-Type: multipart/form-data; %s\r\nContent-Length: %d\r\n\r\n%s", tc.params, len(body), body)
+			var req Request
+			if err := req.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+				t.Fatal(err)
+			}
+			form, err := req.MultipartForm()
+			if tc.readForm {
+				if err != nil || !reflect.DeepEqual(form.Value["role"], []string{"user"}) {
+					t.Fatalf("unexpected form %v, error %v", form, err)
+				}
+			} else if !errors.Is(err, ErrNoMultipartForm) {
+				t.Fatalf("expected ErrNoMultipartForm, got %v", err)
+			}
+			var wire bytes.Buffer
+			if _, err := req.WriteTo(&wire); err != nil {
+				t.Fatal(err)
+			}
+			forwarded, err := http.ReadRequest(bufio.NewReader(&wire))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer forwarded.Body.Close()
+			if got := forwarded.FormValue("role"); got != "user" {
+				t.Fatalf("net/http read role %q, expected user", got)
+			}
+		})
+	}
+}
+
 func TestRequestMultipartFormEpilogue(t *testing.T) {
 	t.Parallel()
 
@@ -2520,6 +2568,15 @@ func TestRequestMultipartFormEpilogue(t *testing.T) {
 	var req Request
 	if err := req.Read(br); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	// The pre-parsed size includes the epilogue, even if a handler has
+	// since changed the request headers.
+	req.Header.SetContentLength(1)
+	if f, err := req.MultipartFormWithLimit(len(body) - 1); f != nil || !errors.Is(err, ErrBodyTooLarge) {
+		t.Fatalf("oversized form = %v, %v; want nil, ErrBodyTooLarge", f, err)
+	}
+	if f, err := req.MultipartFormWithLimit(len(body)); err != nil || f == nil {
+		t.Fatalf("form at limit = %v, %v; want a form", f, err)
 	}
 	req.RemoveMultipartFormFiles()
 
@@ -2831,6 +2888,28 @@ func TestRequestWriteRequestURINoHost(t *testing.T) {
 	}
 }
 
+func TestRequestWriteAfterInvalidHost(t *testing.T) {
+	t.Parallel()
+
+	const target = "/public/page?id=1"
+	var req Request
+	req.Header.SetHost("shop.example:x")
+	req.SetRequestURI(target)
+	req.URI()
+
+	var buf bytes.Buffer
+	bw := bufio.NewWriter(&buf)
+	if err := req.Write(bw); err == nil {
+		t.Error("expected invalid host error")
+	}
+	if bw.Buffered() != 0 || buf.Len() != 0 {
+		t.Error("wrote part of an invalid request")
+	}
+	if got := string(req.RequestURI()); got != target {
+		t.Fatalf("request target changed to %q", got)
+	}
+}
+
 func TestRequestWriteEmptyPathWithQuery(t *testing.T) {
 	t.Parallel()
 
@@ -2879,9 +2958,7 @@ func TestRequestWriteURLAuthKeepsAuthorization(t *testing.T) {
 	for auth, expected := range cases {
 		var req Request
 		req.SetRequestURI("http://user:pass@example.com/foo")
-		if auth != "" {
-			req.Header.Set(HeaderAuthorization, auth)
-		}
+		req.Header.Set(HeaderAuthorization, auth)
 		var w bytes.Buffer
 		bw := bufio.NewWriter(&w)
 		if err := req.Write(bw); err != nil {
@@ -2889,6 +2966,10 @@ func TestRequestWriteURLAuthKeepsAuthorization(t *testing.T) {
 		}
 		if err := bw.Flush(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if got := req.Header.PeekAll(HeaderAuthorization); len(got) != 1 || string(got[0]) != auth {
+			t.Fatalf("Write changed Authorization from %q to %q", auth, got)
 		}
 
 		var req1 Request
@@ -2904,23 +2985,29 @@ func TestRequestWriteURLAuthKeepsAuthorization(t *testing.T) {
 func TestRequestWriteConnectTargetAfterURIAccess(t *testing.T) {
 	t.Parallel()
 
-	for _, target := range []string{"example.com:443", "[::1]:443", "//example.com:443", "/tunnel"} {
-		t.Run(target, func(t *testing.T) {
+	for _, tc := range []struct{ target, want string }{
+		{"example.com:443", "example.com:443"},
+		{"[::1]:443", "[::1]:443"},
+		{"[fe80::1%25eth0]:443", "[fe80::1%25eth0]:443"},
+		{"//example.com:443", "//example.com:443"},
+		{"/tunnel", "/tunnel"},
+		{"public/admin/secret", "/public/admin/secret"},
+		{"host:443/public", "/host:443/public"},
+		{"/admin/../public/x", "/public/x"},
+		{"//admin%2F..%2Fpublic%2Fx:443", "/public/x:443"},
+		{"example.com:443?q=1", "/example.com:443?q=1"},
+	} {
+		t.Run(tc.target, func(t *testing.T) {
 			t.Parallel()
 
 			var req Request
-			s := "CONNECT " + target + " HTTP/1.1\r\nHost: example.com:443\r\n\r\n"
+			s := "CONNECT " + tc.target + " HTTP/1.1\r\nHost: example.com:443\r\n\r\n"
 			if err := req.Read(bufio.NewReader(strings.NewReader(s))); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			// Accessing the URI makes Write rebuild the target from the
-			// parsed URI, which must keep the CONNECT target as it is, also
-			// when path normalization is enabled, as HostClient leaves it.
-			req.URI().DisablePathNormalizing = false
-			if got := string(req.RequestURI()); got != target {
-				t.Fatalf("unexpected request uri %q. Expecting %q", got, target)
-			}
+			// HostClient accesses the parsed URI before writing the request.
+			req.URI()
 
 			var w bytes.Buffer
 			bw := bufio.NewWriter(&w)
@@ -2932,7 +3019,10 @@ func TestRequestWriteConnectTargetAfterURIAccess(t *testing.T) {
 			}
 
 			firstLine, _, _ := strings.Cut(w.String(), "\r\n")
-			if want := "CONNECT " + target + " HTTP/1.1"; firstLine != want {
+			if got := string(req.RequestURI()); got != tc.want {
+				t.Errorf("unexpected request uri %q. Expecting %q", got, tc.want)
+			}
+			if want := "CONNECT " + tc.want + " HTTP/1.1"; firstLine != want {
 				t.Fatalf("unexpected request line %q. Expecting %q", firstLine, want)
 			}
 		})
@@ -3195,6 +3285,32 @@ func TestRequestReadChunked(t *testing.T) {
 	}
 	verifyRequestHeader(t, &req.Header, -1, "/foo", "google.com", "", "aa/bb")
 	verifyTrailer(t, &req.Header, map[string]string{"Trail": "test"})
+}
+
+func TestRequestWriteChunkedKeepsRepeatedHeaderOrder(t *testing.T) {
+	t.Parallel()
+
+	const raw = "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked\r\n" +
+		"X-Tenant: public\r\nX-Tenant: internal\r\n\r\n3\r\nabc\r\n0\r\n\r\n"
+	var req Request
+	if err := req.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(req.Header.Peek("X-Tenant")); got != "public" {
+		t.Fatalf("X-Tenant before forwarding = %q", got)
+	}
+	var wire bytes.Buffer
+	if _, err := req.WriteTo(&wire); err != nil {
+		t.Fatal(err)
+	}
+	forwarded, err := http.ReadRequest(bufio.NewReader(&wire))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer forwarded.Body.Close()
+	if got := forwarded.Header.Values("X-Tenant"); !reflect.DeepEqual(got, []string{"public", "internal"}) {
+		t.Fatalf("forwarded X-Tenant = %q", got)
+	}
 }
 
 func TestRequestChunkedEmpty(t *testing.T) {
@@ -3761,6 +3877,26 @@ func TestReadBodyChunked(t *testing.T) {
 	testReadBodyChunked(t, 12343)
 }
 
+func TestAppendBodyFixedSizeLargeChunks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires a body larger than 100 MiB")
+	}
+	body := make([]byte, 101<<20)
+	r := bufio.NewReader(strings.NewReader("ab"))
+	body, err := appendBodyFixedSize(r, body, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := &body[0]
+	body, err = appendBodyFixedSize(r, body, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if &body[0] != first {
+		t.Fatal("second one-byte chunk reallocated the body")
+	}
+}
+
 func TestRequestURITLS(t *testing.T) {
 	t.Parallel()
 
@@ -3826,8 +3962,8 @@ func TestRequestPostArgsSuccess(t *testing.T) {
 
 	testRequestPostArgsSuccess(t, &req, "POST / HTTP/1.1\r\nHost: aaa.com\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 18\r\n\r\nfoo&b%20r=b+z=&qwe", 3, "foo=", "b r=b z=", "qwe=")
 
-	// media type is case-insensitive
-	testRequestPostArgsSuccess(t, &req, "POST / HTTP/1.1\r\nHost: aaa.com\r\nContent-Type: Application/X-WWW-Form-Urlencoded\r\nContent-Length: 7\r\n\r\nfoo=bar", 1, "foo=bar")
+	// A mixed-case media type may have parameters.
+	testRequestPostArgsSuccess(t, &req, "POST / HTTP/1.1\r\nHost: aaa.com\r\nContent-Type: Application/X-WWW-Form-Urlencoded \t; charset=utf-8\r\nContent-Length: 7\r\n\r\nfoo=bar", 1, "foo=bar")
 }
 
 func TestRequestPostArgsError(t *testing.T) {
@@ -3840,6 +3976,10 @@ func TestRequestPostArgsError(t *testing.T) {
 
 	// invalid content-type
 	testRequestPostArgsError(t, &req, "POST /aa HTTP/1.1\r\nHost: aaa\r\nContent-Type: text/html\r\nContent-Length: 5\r\n\r\nabcde")
+
+	for _, suffix := range []string{"2", "+json", " charset=utf-8"} {
+		testRequestPostArgsError(t, &req, "POST /aa HTTP/1.1\r\nHost: aaa\r\nContent-Type: application/x-www-form-urlencoded"+suffix+"\r\nContent-Length: 7\r\n\r\nfoo=bar")
+	}
 }
 
 func testRequestPostArgsError(t *testing.T, req *Request, s string) {
@@ -5614,6 +5754,50 @@ func TestResponseBodyStream(t *testing.T) {
 			}
 		})
 	})
+}
+
+func TestResponseCompressedBodyStreamReadError(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	body := io.MultiReader(strings.NewReader("partial body"), iotest.ErrReader(io.ErrUnexpectedEOF))
+	resp.SetBodyStream(body, -1)
+	resp.gzipBody(CompressDefaultCompression)
+
+	var wire bytes.Buffer
+	bw := bufio.NewWriter(&wire)
+	if err := resp.Write(bw); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Errorf("response write error = %v, want unexpected EOF", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.HasSuffix(wire.Bytes(), []byte("0\r\n\r\n")) {
+		t.Error("incomplete response ended with the final chunk")
+	}
+}
+
+func TestBoundedCompressedBodyStreamError(t *testing.T) {
+	t.Parallel()
+
+	for _, method := range []string{"Read", "WriteTo"} {
+		t.Run(method, func(t *testing.T) {
+			source := newStreamPipe()
+			stream := newCompressedBodyStream(source, 0, func(*bufio.Writer, io.Reader, int) error {
+				return io.ErrUnexpectedEOF
+			})
+			defer stream.Close()
+			var err error
+			if method == "Read" {
+				_, err = io.ReadAll(stream)
+			} else {
+				_, err = io.Copy(io.Discard, stream)
+			}
+			if !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Fatalf("%s error = %v, want unexpected EOF", method, err)
+			}
+		})
+	}
 }
 
 func TestResponseCompressedBodyStreamCloseClosesOriginal(t *testing.T) {
