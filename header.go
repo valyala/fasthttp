@@ -794,11 +794,10 @@ func (h *RequestHeader) AddTrailer(trailer string) error {
 	return h.AddTrailerBytes(s2b(trailer))
 }
 
-// The errors of the header parser. With Server.SecureErrorLogMessage they are
-// returned as they are. Without it ErrUnsupportedRequestMethod, for a request
-// line whose method is not a token, and ErrUnsupportedTransferEncoding, for a
-// Transfer-Encoding that fasthttp doesn't read, a repeated one included, come
-// with a text that says more, and errors.Is matches them all the same.
+// With or without Server.SecureErrorLogMessage, errors.Is matches
+// ErrUnsupportedRequestMethod to the error of a request line whose method is not
+// a token, and ErrUnsupportedTransferEncoding to the error of a
+// Transfer-Encoding that fasthttp doesn't read, a repeated one included.
 var (
 	ErrBadTrailer                    = errors.New("fasthttp: contain forbidden trailer")
 	ErrReadingResponseHeaders        = errors.New("fasthttp: error when reading response headers")

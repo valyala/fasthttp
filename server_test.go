@@ -9748,42 +9748,38 @@ func TestServerReduceMemoryUsageKeepBodyBufferConnectionLifecycle(t *testing.T) 
 }
 
 // An ErrorHandler can tell the errors of a method that is not a token and of a
-// Transfer-Encoding that fasthttp doesn't read from the other bad requests, with
-// or without SecureErrorLogMessage.
+// Transfer-Encoding that fasthttp doesn't read from the other bad requests with
+// errors.Is, with or without SecureErrorLogMessage. Which status it answers is
+// its own choice: this one answers 400 for all of them, as Server does.
 func TestServerErrorHandlerHeaderErrorKinds(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		raw        string
-		statusCode int
-		// matches is what errors.Is has to match on the error that the
-		// ErrorHandler gets, if not nil.
+		name string
+		raw  string
+		// matches is the sentinel that errors.Is has to match on the error that
+		// the ErrorHandler gets, and nil for an error that matches neither.
 		matches error
 	}{
 		{
 			// The method is a token, and a parenthesis is not a character of one.
-			name:       "method that is not a token",
-			raw:        "BAD(METHOD / HTTP/1.1\r\nHost: example.com\r\n\r\n",
-			statusCode: StatusBadRequest,
-			matches:    ErrUnsupportedRequestMethod,
+			name:    "method that is not a token",
+			raw:     "BAD(METHOD / HTTP/1.1\r\nHost: example.com\r\n\r\n",
+			matches: ErrUnsupportedRequestMethod,
 		},
 		{
-			name:       "missing method",
-			raw:        "FOO\r\nHost: example.com\r\n\r\n",
-			statusCode: StatusBadRequest,
+			name: "missing method",
+			raw:  "FOO\r\nHost: example.com\r\n\r\n",
 		},
 		{
-			name:       "transfer coding that fasthttp doesn't read",
-			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
-			statusCode: StatusNotImplemented,
-			matches:    ErrUnsupportedTransferEncoding,
+			name:    "transfer coding that fasthttp doesn't read",
+			raw:     "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			matches: ErrUnsupportedTransferEncoding,
 		},
 		{
-			name:       "repeated transfer-encoding",
-			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
-			statusCode: StatusNotImplemented,
-			matches:    ErrUnsupportedTransferEncoding,
+			name:    "repeated transfer-encoding",
+			raw:     "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+			matches: ErrUnsupportedTransferEncoding,
 		},
 	}
 	for _, tt := range tests {
@@ -9797,12 +9793,6 @@ func TestServerErrorHandlerHeaderErrorKinds(t *testing.T) {
 					SecureErrorLogMessage: secure,
 					ErrorHandler: func(ctx *RequestCtx, err error) {
 						handlerErr = err
-						// What a framework does with the error: net/http answers
-						// 501 for a Transfer-Encoding that it doesn't read.
-						if errors.Is(err, ErrUnsupportedTransferEncoding) {
-							ctx.SetStatusCode(StatusNotImplemented)
-							return
-						}
 						ctx.SetStatusCode(StatusBadRequest)
 					},
 				}
@@ -9817,11 +9807,16 @@ func TestServerErrorHandlerHeaderErrorKinds(t *testing.T) {
 				if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
-				if got := resp.StatusCode(); got != tt.statusCode {
-					t.Fatalf("unexpected status code %d. Expecting %d", got, tt.statusCode)
+				if got := resp.StatusCode(); got != StatusBadRequest {
+					t.Fatalf("unexpected status code %d. Expecting %d, from the ErrorHandler", got, StatusBadRequest)
 				}
-				if tt.matches != nil && !errors.Is(handlerErr, tt.matches) {
-					t.Fatalf("the ErrorHandler got %q, which doesn't match %q", handlerErr, tt.matches)
+				if handlerErr == nil {
+					t.Fatal("the ErrorHandler didn't get an error")
+				}
+				for _, sentinel := range []error{ErrUnsupportedRequestMethod, ErrUnsupportedTransferEncoding} {
+					if got, want := errors.Is(handlerErr, sentinel), sentinel == tt.matches; got != want { //nolint:errorlint // which sentinel the row names
+						t.Fatalf("errors.Is(%q, %q) = %v. Expecting %v", handlerErr, sentinel, got, want)
+					}
 				}
 			})
 		}
