@@ -9845,3 +9845,115 @@ func TestServerReduceMemoryUsageKeepBodyBufferConnectionLifecycle(t *testing.T) 
 		t.Fatalf("expected handledCtx.Response.body to be nil after connection closed")
 	}
 }
+
+// An ErrorHandler can tell the errors of a method that is not a token and of a
+// Transfer-Encoding that fasthttp doesn't read from the other bad requests with
+// errors.Is, with or without SecureErrorLogMessage. Which status it answers is
+// its own choice: this one answers 400 for all of them, as Server does.
+func TestServerErrorHandlerHeaderErrorKinds(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  string
+		// matches is the sentinel that errors.Is has to match on the error that
+		// the ErrorHandler gets, and nil for an error that matches neither.
+		matches error
+	}{
+		{
+			// The method is a token, and a parenthesis is not a character of one.
+			name:    "method that is not a token",
+			raw:     "BAD(METHOD / HTTP/1.1\r\nHost: example.com\r\n\r\n",
+			matches: ErrUnsupportedRequestMethod,
+		},
+		{
+			name: "missing method",
+			raw:  "FOO\r\nHost: example.com\r\n\r\n",
+		},
+		{
+			name:    "transfer coding that fasthttp doesn't read",
+			raw:     "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			matches: ErrUnsupportedTransferEncoding,
+		},
+		{
+			name:    "repeated transfer-encoding",
+			raw:     "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+			matches: ErrUnsupportedTransferEncoding,
+		},
+	}
+	for _, tt := range tests {
+		for _, secure := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/secure=%v", tt.name, secure), func(t *testing.T) {
+				t.Parallel()
+
+				var handlerErr error
+				s := &Server{
+					Handler:               func(ctx *RequestCtx) {},
+					SecureErrorLogMessage: secure,
+					ErrorHandler: func(ctx *RequestCtx, err error) {
+						handlerErr = err
+						ctx.SetStatusCode(StatusBadRequest)
+					},
+				}
+
+				rw := &readWriter{}
+				rw.r.WriteString(tt.raw)
+				if err := s.ServeConn(rw); err == nil {
+					t.Fatal("expecting an error from ServeConn")
+				}
+
+				var resp Response
+				if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got := resp.StatusCode(); got != StatusBadRequest {
+					t.Fatalf("unexpected status code %d. Expecting %d, from the ErrorHandler", got, StatusBadRequest)
+				}
+				if handlerErr == nil {
+					t.Fatal("the ErrorHandler didn't get an error")
+				}
+				for _, sentinel := range []error{ErrUnsupportedRequestMethod, ErrUnsupportedTransferEncoding} {
+					if got, want := errors.Is(handlerErr, sentinel), sentinel == tt.matches; got != want { //nolint:errorlint // which sentinel the row names
+						t.Fatalf("errors.Is(%q, %q) = %v. Expecting %v", handlerErr, sentinel, got, want)
+					}
+				}
+			})
+		}
+	}
+}
+
+// A method that is a token reaches the Handler, whether the application knows it
+// or not: Server doesn't reject it, and the application decides whether to
+// answer 501 (Not Implemented, RFC 9110, section 9.1).
+func TestServerExtensionMethodReachesHandler(t *testing.T) {
+	t.Parallel()
+
+	var methods []string
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			methods = append(methods, string(ctx.Method()))
+			// The application doesn't implement the method, and says so.
+			ctx.SetStatusCode(StatusNotImplemented)
+		},
+		ErrorHandler: func(ctx *RequestCtx, err error) {
+			t.Errorf("unexpected call of the ErrorHandler with %q", err)
+			ctx.SetStatusCode(StatusBadRequest)
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("BREW / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(methods) != 1 || methods[0] != "BREW" {
+		t.Fatalf("the Handler got the methods %q. Expecting [\"BREW\"]", methods)
+	}
+	var resp Response
+	if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := resp.StatusCode(); got != StatusNotImplemented {
+		t.Fatalf("unexpected status code %d. Expecting %d, from the Handler", got, StatusNotImplemented)
+	}
+}

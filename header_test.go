@@ -6537,3 +6537,142 @@ func TestResponseHeaderTransferEncodingOnWire(t *testing.T) {
 		})
 	}
 }
+
+// The errors of a method that is not a token and of a Transfer-Encoding that
+// fasthttp doesn't read are matched with errors.Is with and without
+// Server.SecureErrorLogMessage, and their text without it is the one it was.
+func TestHeaderReadErrorKinds(t *testing.T) {
+	t.Parallel()
+
+	const (
+		badMethod = "BAD(METHOD / HTTP/1.1\r\nHost: a\r\n\r\n"
+		noMethod  = "FOO\r\nHost: a\r\n\r\n"
+	)
+
+	tests := []struct {
+		name string
+		// raw is what the header is read from. A request starts with a
+		// request line, a response with a status line.
+		raw      string
+		response bool
+		// message is the text of the error without Server.SecureErrorLogMessage,
+		// and secure the error that is returned with it.
+		message string
+		secure  error
+		// is lists what errors.Is has to match in both modes, isNot what it must
+		// not match.
+		is    []error
+		isNot []error
+	}{
+		{
+			name:    "request with a method that is not a token",
+			raw:     badMethod,
+			message: fmt.Sprintf("unsupported http request method %q in %q", "BAD(METHOD", badMethod),
+			secure:  ErrUnsupportedRequestMethod,
+			is:      []error{ErrUnsupportedRequestMethod},
+			isNot:   []error{ErrMissingRequestMethod, ErrUnsupportedTransferEncoding},
+		},
+		{
+			name:    "request without a method",
+			raw:     noMethod,
+			message: fmt.Sprintf("cannot find http request method in %q", noMethod),
+			secure:  ErrMissingRequestMethod,
+			isNot:   []error{ErrUnsupportedRequestMethod},
+		},
+		{
+			name:    "request with a transfer coding that fasthttp doesn't read",
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			message: `unsupported transfer-encoding: "gzip, chunked"`,
+			secure:  ErrUnsupportedTransferEncoding,
+			is:      []error{ErrUnsupportedTransferEncoding},
+			isNot:   []error{ErrUnsupportedRequestMethod},
+		},
+		{
+			name:    "request with chunked that is not the final transfer coding",
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked, identity\r\n\r\n",
+			message: `unsupported transfer-encoding: "chunked, identity"`,
+			secure:  ErrUnsupportedTransferEncoding,
+			is:      []error{ErrUnsupportedTransferEncoding},
+		},
+		{
+			name:    "request with a repeated Transfer-Encoding",
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+			message: "too many transfer-encoding headers",
+			secure:  ErrUnsupportedTransferEncoding,
+			is:      []error{ErrUnsupportedTransferEncoding},
+		},
+		{
+			// The error was the same in both modes already.
+			name:    "HTTP/1.0 request with Transfer-Encoding",
+			raw:     "POST / HTTP/1.0\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+			message: ErrUnsupportedTransferEncoding.Error(),
+			secure:  ErrUnsupportedTransferEncoding,
+			is:      []error{ErrUnsupportedTransferEncoding},
+		},
+		{
+			name:     "response with a transfer coding that fasthttp doesn't read",
+			raw:      "HTTP/1.1 200 OK\r\nTransfer-Encoding: deflate\r\n\r\n",
+			response: true,
+			message:  `unsupported transfer-encoding: "deflate"`,
+			secure:   ErrUnsupportedTransferEncoding,
+			is:       []error{ErrUnsupportedTransferEncoding},
+		},
+		{
+			name:     "response with a repeated Transfer-Encoding",
+			raw:      "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n",
+			response: true,
+			message:  "too many transfer-encoding headers",
+			secure:   ErrUnsupportedTransferEncoding,
+			is:       []error{ErrUnsupportedTransferEncoding},
+		},
+	}
+	for _, tt := range tests {
+		for _, secure := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/secure=%v", tt.name, secure), func(t *testing.T) {
+				t.Parallel()
+
+				// parseErr is the error before Read wraps it with the header block.
+				var parseErr, readErr error
+				br := bufio.NewReader(strings.NewReader(tt.raw))
+				if tt.response {
+					var h ResponseHeader
+					h.secureErrorLogMessage = secure
+					_, parseErr = h.parse([]byte(tt.raw))
+					readErr = h.Read(br)
+				} else {
+					var h RequestHeader
+					h.secureErrorLogMessage = secure
+					_, parseErr = h.parse([]byte(tt.raw))
+					readErr = h.Read(br)
+				}
+
+				if parseErr == nil || readErr == nil {
+					t.Fatalf("expecting errors. parse: %v, Read: %v", parseErr, readErr)
+				}
+				if secure {
+					if parseErr != tt.secure { //nolint:errorlint // the very error is the point
+						t.Fatalf("unexpected error %q. Expecting %q", parseErr, tt.secure)
+					}
+				} else if parseErr.Error() != tt.message {
+					// The text has to stay what it was, people match on it.
+					t.Fatalf("unexpected error text %q. Expecting %q", parseErr, tt.message)
+				}
+				for _, err := range []error{parseErr, readErr} {
+					for _, want := range tt.is {
+						if !errors.Is(err, want) {
+							t.Fatalf("error %q is not %q", err, want)
+						}
+					}
+					if secure && !errors.Is(err, tt.secure) {
+						t.Fatalf("error %q is not %q", err, tt.secure)
+					}
+					for _, notWant := range tt.isNot {
+						if errors.Is(err, notWant) {
+							t.Fatalf("error %q is %q", err, notWant)
+						}
+					}
+				}
+			})
+		}
+	}
+}

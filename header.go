@@ -820,6 +820,10 @@ func (h *RequestHeader) AddTrailer(trailer string) error {
 	return h.AddTrailerBytes(s2b(trailer))
 }
 
+// With or without Server.SecureErrorLogMessage, errors.Is matches
+// ErrUnsupportedRequestMethod to the error of a request line whose method is not
+// a token, and ErrUnsupportedTransferEncoding to the error of a
+// Transfer-Encoding that fasthttp doesn't read, a repeated one included.
 var (
 	ErrBadTrailer                    = errors.New("fasthttp: contain forbidden trailer")
 	ErrReadingResponseHeaders        = errors.New("fasthttp: error when reading response headers")
@@ -836,6 +840,22 @@ var (
 	ErrNeedMore                      = errors.New("fasthttp: need more data: cannot find trailing lf")
 	ErrSmallReadBuffer               = errors.New("fasthttp: small read buffer. increase readbuffersize")
 )
+
+// classifiedError is a header error with a detailed message that errors.Is
+// matches to the sentinel err, so that callers don't have to match the text.
+// The message is the one the error had before it was classified.
+type classifiedError struct {
+	err error
+	msg string
+}
+
+func (e *classifiedError) Error() string { return e.msg }
+
+func (e *classifiedError) Unwrap() error { return e.err }
+
+func classifiedErrorf(err error, format string, args ...any) error {
+	return &classifiedError{err: err, msg: fmt.Sprintf(format, args...)}
+}
 
 // AddTrailerBytes add Trailer header value for chunked response
 // to indicate which headers will be sent after the body.
@@ -3726,10 +3746,14 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 			return 0, fmt.Errorf("cannot find http request method in %q", buf)
 		}
 		if !isValidMethod(b[:n]) {
+			// The method is not a token (RFC 9112, section 3), which is a 400. A
+			// method that is a token reaches the Handler, whether the application
+			// knows it or not, and the Handler decides whether to answer 501 (Not
+			// Implemented, RFC 9110, section 9.1).
 			if h.secureErrorLogMessage {
 				return 0, ErrUnsupportedRequestMethod
 			}
-			return 0, fmt.Errorf("unsupported http request method %q in %q", b[:n], buf)
+			return 0, classifiedErrorf(ErrUnsupportedRequestMethod, "unsupported http request method %q in %q", b[:n], buf)
 		}
 	}
 	h.method = append(h.method[:0], b[:n]...)
@@ -3895,7 +3919,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 					if h.secureErrorLogMessage {
 						return 0, ErrUnsupportedTransferEncoding
 					}
-					return 0, errors.New("too many transfer-encoding headers")
+					return 0, classifiedErrorf(ErrUnsupportedTransferEncoding, "too many transfer-encoding headers")
 				}
 				transferEncodingSeen = true
 				if !caseInsensitiveCompare(s.value, strChunked) {
@@ -3903,7 +3927,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 					if h.secureErrorLogMessage {
 						return 0, ErrUnsupportedTransferEncoding
 					}
-					return 0, fmt.Errorf("unsupported transfer-encoding: %q", s.value)
+					return 0, classifiedErrorf(ErrUnsupportedTransferEncoding, "unsupported transfer-encoding: %q", s.value)
 				}
 				h.contentLength = -1
 				h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
@@ -4014,7 +4038,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 					if h.secureErrorLogMessage {
 						return 0, 0, ErrUnsupportedTransferEncoding
 					}
-					return 0, 0, errors.New("too many transfer-encoding headers")
+					return 0, 0, classifiedErrorf(ErrUnsupportedTransferEncoding, "too many transfer-encoding headers")
 				}
 				transferEncodingSeen = true
 			}
@@ -4083,7 +4107,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 					if h.secureErrorLogMessage {
 						return 0, 0, ErrUnsupportedTransferEncoding
 					}
-					return 0, 0, fmt.Errorf("unsupported transfer-encoding: %q", s.value)
+					return 0, 0, classifiedErrorf(ErrUnsupportedTransferEncoding, "unsupported transfer-encoding: %q", s.value)
 				}
 
 				if isChunked {
