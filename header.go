@@ -394,12 +394,12 @@ func (h *RequestHeader) setRawBodyFraming(contentLength int, hasBody bool) error
 
 func (h *ResponseHeader) isCompressibleContentType() bool {
 	contentType := h.ContentType()
-	return bytes.HasPrefix(contentType, strTextSlash) ||
-		bytes.HasPrefix(contentType, strApplicationSlash) ||
-		bytes.HasPrefix(contentType, strImageSVG) ||
-		bytes.HasPrefix(contentType, strImageIcon) ||
-		bytes.HasPrefix(contentType, strFontSlash) ||
-		bytes.HasPrefix(contentType, strMultipartSlash)
+	return caseInsensitiveHasPrefix(contentType, strTextSlash) ||
+		caseInsensitiveHasPrefix(contentType, strApplicationSlash) ||
+		caseInsensitiveHasPrefix(contentType, strImageSVG) ||
+		caseInsensitiveHasPrefix(contentType, strImageIcon) ||
+		caseInsensitiveHasPrefix(contentType, strFontSlash) ||
+		caseInsensitiveHasPrefix(contentType, strMultipartSlash)
 }
 
 // ContentType returns Content-Type header value.
