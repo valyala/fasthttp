@@ -760,6 +760,44 @@ func TestRequestDelLowercaseConnectionClearsCloseFlag(t *testing.T) {
 	if n := hc.IdleConnsCount(); n != 1 {
 		t.Fatalf("idle connections = %d, want 1", n)
 	}
+
+	// Deleting one spelling must not clear the flag when a differently cased
+	// Connection field still asks for close. Here the canonical close field
+	// survives the delete of the lowercase keep-alive field.
+	clientConn2, serverConn2 := net.Pipe()
+	go func() {
+		defer serverConn2.Close()
+		buf := make([]byte, 4096)
+		_, _ = serverConn2.Read(buf)
+		_, _ = serverConn2.Write([]byte("HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nok"))
+		_, _ = serverConn2.Read(buf)
+	}()
+	hc2 := &HostClient{
+		Addr: "example.com:80",
+		Dial: func(string) (net.Conn, error) { return clientConn2, nil },
+	}
+	var req2 Request
+	req2.SetRequestURI("http://example.com/")
+	req2.Header.DisableSpecialHeader()
+	req2.Header.DisableNormalizing()
+	if err := req2.Header.Read(bufio.NewReader(bytes.NewBufferString(
+		"GET / HTTP/1.0\r\nHost: example.com\r\nConnection: close\r\nconnection: keep-alive\r\n\r\n"))); err != nil {
+		t.Fatalf("unexpected request header read error: %v", err)
+	}
+	req2.Header.Del("connection")
+	if !req2.Header.ConnectionClose() {
+		t.Fatal("ConnectionClose cleared while a canonical close field remains")
+	}
+	if vals := req2.Header.PeekAll("Connection"); len(vals) != 1 || string(vals[0]) != "close" {
+		t.Fatalf("PeekAll(Connection) = %q, want [close]", vals)
+	}
+	var resp2 Response
+	if err := hc2.Do(&req2, &resp2); err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	if n := hc2.IdleConnsCount(); n != 0 {
+		t.Fatalf("idle connections = %d, want 0 (remaining close must prevent reuse)", n)
+	}
 }
 
 func BenchmarkRequestHeaderReplaceConnection(b *testing.B) {

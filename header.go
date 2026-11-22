@@ -1993,10 +1993,21 @@ func (h *RequestHeader) del(key []byte) {
 		h.unannounceTrailers()
 	}
 	// With DisableNormalizing the key can be lowercase, so the switch above
-	// does not see HeaderConnection. Clear the flag for any casing, otherwise
-	// deleting the field would still close a reusable connection.
+	// does not see HeaderConnection. delAllArgs matches keys exactly, so
+	// deleting one spelling can leave a differently cased Connection field
+	// behind. Recompute the flag from the fields that remain: a surviving
+	// close must still close the connection even though another field was
+	// removed.
 	if caseInsensitiveCompare(strConnection, key) {
-		h.connectionClose = false
+		hadClose := hasConnectionCloseValue(h.h) || hasConnectionCloseValue(h.trailerH)
+		h.h = delAllArgs(h.h, b2s(key))
+		h.trailerH = delAllArgs(h.trailerH, b2s(key))
+		if hasConnectionCloseValue(h.h) || hasConnectionCloseValue(h.trailerH) {
+			h.connectionClose = true
+		} else if hadClose {
+			h.connectionClose = false
+		}
+		return
 	}
 	h.h = delAllArgs(h.h, b2s(key))
 	h.trailerH = delAllArgs(h.trailerH, b2s(key))
