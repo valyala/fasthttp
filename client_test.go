@@ -1700,100 +1700,60 @@ func TestPipelineClientSkipBodyIdentityBodyTooLargeDoesNotBlock(t *testing.T) {
 func TestClientConnectTunnelResponseHasNoBody(t *testing.T) {
 	t.Parallel()
 
-	responses := []struct {
-		name string
-		// response is what the proxy answers to CONNECT.
-		response string
-		// tunnel says that the tunnel is established, so that the response ends
-		// at its header and the connection stays open. Otherwise the response is
-		// an error of the clients.
-		tunnel bool
-	}{
-		{
-			name:     "200",
-			response: "HTTP/1.1 200 Connection Established\r\n\r\n",
-			tunnel:   true,
-		},
-		{
-			// A 2xx response establishes the tunnel, so a client ignores its
-			// Transfer-Encoding whatever coding it names (RFC 9112, section 6.3).
-			name:     "200 with Transfer-Encoding",
-			response: "HTTP/1.1 200 Connection Established\r\nTransfer-Encoding: gzip\r\n\r\n",
-			tunnel:   true,
-		},
-		{
-			// A 407 response doesn't, so the same field is an unknown transfer
-			// coding in a response that has a body.
-			name:     "407 with Transfer-Encoding",
-			response: "HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"proxy\"\r\nTransfer-Encoding: gzip\r\n\r\n",
-		},
-	}
-	for _, tt := range responses {
-		for _, skipBody := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/SkipBody=%v", tt.name, skipBody), func(t *testing.T) {
-				t.Parallel()
-
-				ln := fasthttputil.NewInmemoryListener()
-				release := make(chan struct{})
+	for _, skipBody := range []bool{false, true} {
+		ln := fasthttputil.NewInmemoryListener()
+		release := make(chan struct{})
+		go func() {
+			for {
+				conn, err := ln.Accept()
+				if err != nil {
+					return
+				}
 				go func() {
-					for {
-						conn, err := ln.Accept()
-						if err != nil {
-							return
-						}
-						go func() {
-							defer conn.Close()
-							var req Request
-							if err := req.Read(bufio.NewReader(conn)); err != nil {
-								return
-							}
-							// With the tunnel established the response ends at its
-							// header and the connection stays open.
-							if _, err := conn.Write([]byte(tt.response)); err != nil {
-								t.Error(err)
-								return
-							}
-							<-release
-						}()
-					}
-				}()
-
-				dial := func(string) (net.Conn, error) { return ln.Dial() }
-				clients := map[string]clientDoer{
-					"HostClient":     &HostClient{Addr: "proxy.example.com", Dial: dial},
-					"PipelineClient": &PipelineClient{Addr: "proxy.example.com", Dial: dial},
-				}
-				for name, c := range clients {
+					defer conn.Close()
 					var req Request
-					var resp Response
-					resp.SkipBody = skipBody
-					req.Header.SetMethod(MethodConnect)
-					req.SetRequestURI("http://example.com:443/")
+					if err := req.Read(bufio.NewReader(conn)); err != nil {
+						return
+					}
+					// The tunnel is established: the response ends at its
+					// header and the connection stays open.
+					if _, err := conn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
+						t.Error(err)
+						return
+					}
+					<-release
+				}()
+			}
+		}()
 
-					errCh := make(chan error, 1)
-					go func() { errCh <- c.Do(&req, &resp) }()
-					select {
-					case err := <-errCh:
-						if !tt.tunnel {
-							if !errors.Is(err, ErrUnknownTransferCoding) {
-								t.Fatalf("%s: got error %v, want %v", name, err, ErrUnknownTransferCoding)
-							}
-							continue
-						}
-						if err != nil {
-							t.Fatalf("%s: %v", name, err)
-						}
-					case <-time.After(5 * time.Second):
-						t.Fatalf("%s: Do blocked on the open tunnel", name)
-					}
-					if resp.StatusCode() != StatusOK || len(resp.Body()) != 0 {
-						t.Fatalf("%s: got status %d body %q", name, resp.StatusCode(), resp.Body())
-					}
-				}
-				close(release)
-				ln.Close()
-			})
+		dial := func(string) (net.Conn, error) { return ln.Dial() }
+		clients := map[string]clientDoer{
+			"HostClient":     &HostClient{Addr: "proxy.example.com", Dial: dial},
+			"PipelineClient": &PipelineClient{Addr: "proxy.example.com", Dial: dial},
 		}
+		for name, c := range clients {
+			var req Request
+			var resp Response
+			resp.SkipBody = skipBody
+			req.Header.SetMethod(MethodConnect)
+			req.SetRequestURI("http://example.com:443/")
+
+			errCh := make(chan error, 1)
+			go func() { errCh <- c.Do(&req, &resp) }()
+			select {
+			case err := <-errCh:
+				if err != nil {
+					t.Fatalf("%s (SkipBody=%v): %v", name, skipBody, err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatalf("%s (SkipBody=%v): Do blocked on the open tunnel", name, skipBody)
+			}
+			if resp.StatusCode() != StatusOK || len(resp.Body()) != 0 {
+				t.Fatalf("%s (SkipBody=%v): got status %d body %q", name, skipBody, resp.StatusCode(), resp.Body())
+			}
+		}
+		close(release)
+		ln.Close()
 	}
 }
 
