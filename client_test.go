@@ -7149,3 +7149,52 @@ func TestPipelineClientDoTimeoutClearsStatusCode(t *testing.T) {
 		t.Fatalf("unexpected status code after the request timed out: %d. Expecting 0", statusCode)
 	}
 }
+
+func TestClientDoServerResponseClearsStatusCodeOnError(t *testing.T) {
+	t.Parallel()
+
+	// A reverse proxy passes the response of the context it serves straight to
+	// the client, so a failed request must not leave the server default in it.
+	dialErr := func(string) (net.Conn, error) {
+		return nil, errors.New("dial error")
+	}
+
+	for _, tc := range []struct {
+		name string
+		do   func(req *Request, resp *Response) error
+	}{
+		{"HostClient.Do", func(req *Request, resp *Response) error {
+			return (&HostClient{Dial: dialErr}).Do(req, resp)
+		}},
+		{"HostClient.DoRedirects", func(req *Request, resp *Response) error {
+			return (&HostClient{Dial: dialErr}).DoRedirects(req, resp, 1)
+		}},
+		{"Client.Do", func(req *Request, resp *Response) error {
+			return (&Client{Dial: dialErr}).Do(req, resp)
+		}},
+		{"Client.DoRedirects", func(req *Request, resp *Response) error {
+			return (&Client{Dial: dialErr}).DoRedirects(req, resp, 1)
+		}},
+		{"PipelineClient.Do TLS config error", func(req *Request, resp *Response) error {
+			return (&PipelineClient{IsTLS: true, Addr: "foo:bar:baz"}).Do(req, resp)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var req Request
+			req.SetRequestURI("http://example.com/")
+
+			var ctx RequestCtx
+			ctx.Init(&req, nil, nil)
+			if statusCode := ctx.Response.StatusCode(); statusCode != StatusOK {
+				t.Fatalf("unexpected server default status code: %d. Expecting %d", statusCode, StatusOK)
+			}
+
+			if err := tc.do(&ctx.Request, &ctx.Response); err == nil {
+				t.Fatal("expecting error")
+			}
+			if statusCode := ctx.Response.StatusCode(); statusCode != 0 {
+				t.Fatalf("unexpected status code after the failed request: %d. Expecting 0", statusCode)
+			}
+		})
+	}
+}

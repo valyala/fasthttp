@@ -69,6 +69,9 @@ const DefaultLBClientTimeout = time.Second
 func (cc *LBClient) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	c := cc.get()
 	if c == nil {
+		// No client could read a response, so a reused response must not report
+		// the status code of an earlier request.
+		clearStatusOnFailedRequest(resp)
 		return ErrNoAvailableClients
 	}
 	return c.DoDeadline(req, resp, deadline)
@@ -79,6 +82,8 @@ func (cc *LBClient) DoTimeout(req *Request, resp *Response, timeout time.Duratio
 	deadline := time.Now().Add(timeout)
 	c := cc.get()
 	if c == nil {
+		// See DoDeadline: no response was read for this request.
+		clearStatusOnFailedRequest(resp)
 		return ErrNoAvailableClients
 	}
 	return c.DoDeadline(req, resp, deadline)

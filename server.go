@@ -2567,6 +2567,16 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	for {
 		connRequestNum++
 
+		// A response always carries a status code, and middleware wrapping the
+		// handler expects to read the one the client receives. Set the default
+		// here, before ErrorHandler or ExpectHandler can see the context, instead
+		// of just before the handler: those callbacks run earlier and a fresh
+		// context would read 0 while a reused one could still read an earlier
+		// status code. Response.Reset keeps the default for server responses, so
+		// a handler or callback that resets the response does not make
+		// middleware read 0 either.
+		ctx.Response.Header.setServerDefaultStatus()
+
 		if connRequestNum == 1 {
 			// Apply ReadTimeout to the first request byte.
 			if s.ReadTimeout > 0 {
@@ -2842,13 +2852,6 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		// If a client denies a request the handler should not be called
 		if continueReadingRequest {
-			// A response always carries a status code, and middleware wrapping the
-			// handler expects to read the one the client receives. Set the default
-			// before the handler runs: TimeoutHandler can return while the handler
-			// goroutine still uses ctx.Response, so it must not be read or written
-			// here afterwards. Response.Reset keeps the default, so a handler that
-			// resets the response does not make middleware read 0.
-			ctx.Response.Header.setServerDefaultStatus()
 			s.Handler(ctx)
 		}
 

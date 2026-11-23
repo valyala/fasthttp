@@ -1842,6 +1842,11 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	customStreamBody := !req.forceResponseBodyBuffering && (resp.StreamBody || c.StreamResponseBody)
 	customNoDefaultContentType := resp.Header.noDefaultContentType
 	resp.Reset()
+	// Reset restores the StatusOK default of a response served by Server, but
+	// no response has been read for this attempt yet. Clear it, so a reverse
+	// proxy handler that passed ctx.Response to the client does not report a
+	// successful status code when the attempt fails before a response arrives.
+	resp.Header.resetStatus()
 	resp.SkipBody = customSkipBody
 	resp.StreamBody = customStreamBody
 	resp.Header.noDefaultContentType = customNoDefaultContentType

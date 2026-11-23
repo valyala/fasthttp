@@ -1561,7 +1561,11 @@ func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
 	h.copyTo(&dst.header)
 
 	dst.noDefaultDate = h.noDefaultDate
-	dst.statusCode = h.statusCode
+	// A response served by Server always carries a status code, so copying a
+	// response with no positive status code must not replace its default with 0.
+	if h.statusCode > 0 || !dst.serverResponse {
+		dst.statusCode = h.statusCode
+	}
 	dst.statusMessage = append(dst.statusMessage, h.statusMessage...)
 	dst.contentEncoding = append(dst.contentEncoding, h.contentEncoding...)
 	dst.server = append(dst.server, h.server...)

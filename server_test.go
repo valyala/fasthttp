@@ -5409,6 +5409,112 @@ func TestServerMiddlewareSeesStatusCodeAfterResponseReset(t *testing.T) {
 	}
 }
 
+func TestServerMiddlewareSeesStatusCodeAfterResponseCopy(t *testing.T) {
+	t.Parallel()
+
+	// cached only has a body, so its status code is unset and Response.CopyTo
+	// must not overwrite the default of the server response it copies into.
+	var cached Response
+	cached.SetBodyString("cached")
+
+	var middlewareStatusCode int
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			cached.CopyTo(&ctx.Response)
+			middlewareStatusCode = ctx.Response.StatusCode()
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var resp Response
+	if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if statusCode := resp.StatusCode(); statusCode != StatusOK {
+		t.Fatalf("unexpected response status code: %d. Expecting %d", statusCode, StatusOK)
+	}
+	if string(resp.Body()) != "cached" {
+		t.Fatalf("unexpected response body: %q. Expecting %q", resp.Body(), "cached")
+	}
+	if middlewareStatusCode != StatusOK {
+		t.Fatalf("middleware saw status code %d. Expecting %d", middlewareStatusCode, StatusOK)
+	}
+}
+
+func TestServerErrorHandlerDefaultsStatusCode(t *testing.T) {
+	t.Parallel()
+
+	var errorHandlerStatusCode int
+	s := &Server{
+		MaxRequestBodySize: 1,
+		Handler:            func(ctx *RequestCtx) {},
+		ErrorHandler: func(ctx *RequestCtx, _ error) {
+			errorHandlerStatusCode = ctx.Response.StatusCode()
+			ctx.SetBodyString("error")
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("POST / HTTP/1.1\r\nHost: example.com\r\nContent-Length: 5\r\n\r\n12345")
+	if err := s.ServeConn(rw); err == nil {
+		t.Fatal("expecting error from ServeConn")
+	}
+
+	var resp Response
+	if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if statusCode := resp.StatusCode(); statusCode != StatusOK {
+		t.Fatalf("unexpected response status code: %d. Expecting %d", statusCode, StatusOK)
+	}
+	if string(resp.Body()) != "error" {
+		t.Fatalf("unexpected response body: %q. Expecting %q", resp.Body(), "error")
+	}
+	if errorHandlerStatusCode != StatusOK {
+		t.Fatalf("ErrorHandler saw status code %d. Expecting %d", errorHandlerStatusCode, StatusOK)
+	}
+}
+
+func TestServerExpectHandlerDefaultsStatusCode(t *testing.T) {
+	t.Parallel()
+
+	var expectHandlerStatusCode int
+	s := &Server{
+		ExpectHandler: func(ctx *RequestCtx) int {
+			expectHandlerStatusCode = ctx.Response.StatusCode()
+			return StatusContinue
+		},
+		Handler: func(ctx *RequestCtx) {
+			ctx.SetBodyString(string(ctx.PostBody()))
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("POST / HTTP/1.1\r\nHost: example.com\r\nExpect: 100-continue\r\nContent-Length: 2\r\n\r\nok")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var resp Response
+	if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if statusCode := resp.StatusCode(); statusCode != StatusOK {
+		t.Fatalf("unexpected response status code: %d. Expecting %d", statusCode, StatusOK)
+	}
+	if string(resp.Body()) != "ok" {
+		t.Fatalf("unexpected response body: %q. Expecting %q", resp.Body(), "ok")
+	}
+	if expectHandlerStatusCode != StatusOK {
+		t.Fatalf("ExpectHandler saw status code %d. Expecting %d", expectHandlerStatusCode, StatusOK)
+	}
+}
+
 func TestRequestCtxInitDefaultsStatusCode(t *testing.T) {
 	t.Parallel()
 
