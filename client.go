@@ -1458,6 +1458,7 @@ func hasAuthority(location []byte) bool {
 
 func getRedirectURL(baseURL string, location []byte, disablePathNormalizing bool, dst *URI) (string, error) {
 	dst.Update(baseURL)
+	dst.DisablePathNormalizing = disablePathNormalizing
 	if err := dst.UpdateBytesErr(location); err != nil {
 		return "", err
 	}

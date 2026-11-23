@@ -1019,12 +1019,19 @@ func (u *URI) updateBytes(newURI, buf []byte) ([]byte, error) {
 	default:
 		// update the last path part after the slash
 		path := u.Path()
+		if u.DisablePathNormalizing {
+			path = u.PathOriginal()
+		}
 		n = bytes.LastIndexByte(path, '/')
 		if n < 0 {
 			panic(fmt.Sprintf("BUG: path must contain at least one slash: %q %q", u.Path(), newURI))
 		}
 		buf = u.appendSchemeHost(buf[:0])
-		buf = appendQuotedPath(buf, path[:n+1])
+		if u.DisablePathNormalizing {
+			buf = append(buf, path[:n+1]...)
+		} else {
+			buf = appendQuotedPath(buf, path[:n+1])
+		}
 		buf = append(buf, newURI...)
 		if err := u.Parse(nil, buf); err != nil {
 			return nil, err

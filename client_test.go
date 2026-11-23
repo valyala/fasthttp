@@ -7113,6 +7113,23 @@ func TestGetRedirectURL(t *testing.T) {
 			},
 			expected: "http://bar.example.com/123/*/456",
 		},
+		{
+			name: "path normalizing disabled, escaped directory in a relative redirect",
+			args: args{
+				baseURL:                "http://foo.example.com/photo%2Dfolder/start",
+				location:               []byte("next"),
+				disablePathNormalizing: true,
+			},
+			expected: "http://foo.example.com/photo%2Dfolder/next",
+		},
+		{
+			name: "path normalizing enabled, escaped directory in a relative redirect",
+			args: args{
+				baseURL:  "http://foo.example.com/photo%2Dfolder/start",
+				location: []byte("next"),
+			},
+			expected: "http://foo.example.com/photo-folder/next",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
