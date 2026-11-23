@@ -180,6 +180,48 @@ func TestHostClientConnectionUpgradeEOFBodyNotReused(t *testing.T) {
 	}
 }
 
+func TestHostClientConnectionUpgradeHeadResponseReused(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	defer ln.Close()
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		br := bufio.NewReader(conn)
+		var req Request
+		if err := req.Read(br); err != nil {
+			t.Error(err)
+			return
+		}
+		// A HEAD response has no body, so no Content-Length doesn't mean EOF framing.
+		_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\n"))
+		_, _ = br.ReadByte() // keep the connection open until the client closes it
+	}()
+
+	c := &HostClient{
+		Addr: "example.com",
+		Dial: func(string) (net.Conn, error) { return ln.Dial() },
+	}
+	defer c.CloseIdleConnections()
+	var req Request
+	var resp Response
+	req.Header.SetMethod(MethodHead)
+	req.SetRequestURI("http://example.com/")
+	if err := c.Do(&req, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.ConnectionClose() {
+		t.Error("unexpected 'Connection: close' on a HEAD response")
+	}
+	if n := c.IdleConnsCount(); n != 1 {
+		t.Errorf("unexpected idle connection count %d. Expecting %d", n, 1)
+	}
+}
+
 func TestClientStreamCloseWaitsForRead(t *testing.T) {
 	t.Parallel()
 
