@@ -237,6 +237,98 @@ func TestNormalizeHeaderKey(t *testing.T) {
 	}
 }
 
+func TestHeaderNormalizingDisabled(t *testing.T) {
+	t.Parallel()
+
+	type normalizer interface {
+		NormalizingDisabled() bool
+		DisableNormalizing() bool
+		EnableNormalizing() bool
+	}
+
+	check := func(t *testing.T, h normalizer) {
+		t.Helper()
+
+		if h.NormalizingDisabled() {
+			t.Fatal("header names must be normalized by default")
+		}
+		if prev := h.DisableNormalizing(); prev {
+			t.Fatal("DisableNormalizing must report the previous setting: enabled")
+		}
+		if !h.NormalizingDisabled() {
+			t.Fatal("normalizing must be disabled after DisableNormalizing")
+		}
+		if prev := h.DisableNormalizing(); !prev {
+			t.Fatal("DisableNormalizing must report the previous setting: disabled")
+		}
+		if !h.NormalizingDisabled() {
+			t.Fatal("normalizing must stay disabled")
+		}
+		if prev := h.EnableNormalizing(); !prev {
+			t.Fatal("EnableNormalizing must report the previous setting: disabled")
+		}
+		if h.NormalizingDisabled() {
+			t.Fatal("normalizing must be enabled after EnableNormalizing")
+		}
+		if prev := h.EnableNormalizing(); prev {
+			t.Fatal("EnableNormalizing must report the previous setting: enabled")
+		}
+	}
+
+	t.Run("request", func(t *testing.T) {
+		t.Parallel()
+		var h RequestHeader
+		check(t, &h)
+	})
+	t.Run("response", func(t *testing.T) {
+		t.Parallel()
+		var h ResponseHeader
+		check(t, &h)
+	})
+
+	// The getter has to say how names are stored, not just what was last set.
+	t.Run("matches the stored names", func(t *testing.T) {
+		t.Parallel()
+
+		var enabled, disabled RequestHeader
+		disabled.DisableNormalizing()
+		enabled.Set("x-foo-BAR", "1")
+		disabled.Set("x-foo-BAR", "1")
+		if enabled.NormalizingDisabled() || !strings.Contains(enabled.String(), "\r\nX-Foo-Bar: 1\r\n") {
+			t.Fatalf("names must be normalized when NormalizingDisabled is false: %q", enabled.String())
+		}
+		if !disabled.NormalizingDisabled() || !strings.Contains(disabled.String(), "\r\nx-foo-BAR: 1\r\n") {
+			t.Fatalf("names must be stored as given when NormalizingDisabled is true: %q", disabled.String())
+		}
+	})
+
+	t.Run("Reset and CopyTo", func(t *testing.T) {
+		t.Parallel()
+
+		var req, reqCopy RequestHeader
+		req.DisableNormalizing()
+		req.CopyTo(&reqCopy)
+		if !reqCopy.NormalizingDisabled() {
+			t.Fatal("RequestHeader.CopyTo must copy the setting")
+		}
+		req.Reset()
+		if req.NormalizingDisabled() {
+			t.Fatal("RequestHeader.Reset must enable normalizing again")
+		}
+
+		var resp, respCopy ResponseHeader
+		resp.DisableNormalizing()
+		resp.CopyTo(&respCopy)
+		if !respCopy.NormalizingDisabled() {
+			t.Fatal("ResponseHeader.CopyTo must copy the setting")
+		}
+		resp.Reset()
+		if resp.NormalizingDisabled() {
+			t.Fatal("ResponseHeader.Reset must enable normalizing again")
+		}
+	})
+}
+
 func TestResponseHeaderMultiLineValue(t *testing.T) {
 	t.Parallel()
 
@@ -4587,6 +4679,22 @@ func TestResponseHeaderPeekAll(t *testing.T) {
 	expectResponseHeaderAll(t, h, HeaderTrailer, [][]byte{s2b("Foo")})
 }
 
+func TestResponseHeaderPeekAllSetCookie(t *testing.T) {
+	t.Parallel()
+
+	var h ResponseHeader
+	h.Add(HeaderSetCookie, "a=1; Path=/")
+	h.Add(HeaderSetCookie, "b=2; HttpOnly")
+	expectResponseHeaderAll(t, &h, HeaderSetCookie, [][]byte{s2b("a=1; Path=/"), s2b("b=2; HttpOnly")})
+
+	var parsed ResponseHeader
+	br := bufio.NewReader(bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nSet-Cookie: a=1; Path=/\r\nSet-Cookie: b=2; HttpOnly\r\n\r\n"))
+	if err := parsed.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expectResponseHeaderAll(t, &parsed, HeaderSetCookie, [][]byte{s2b("a=1; Path=/"), s2b("b=2; HttpOnly")})
+}
+
 func TestResponseHeaderPeekCanonical(t *testing.T) {
 	t.Parallel()
 
@@ -4738,6 +4846,112 @@ func TestAddVaryHeaderExistingAcceptEncoding(t *testing.T) {
 
 	if n := strings.Count(buf.String(), "Vary: "); n != 1 {
 		t.Errorf("Vary occurred %d times", n)
+	}
+}
+
+func TestAddVaryHeaderKeepsAdditionalLines(t *testing.T) {
+	t.Parallel()
+
+	var h ResponseHeader
+	h.Add("Vary", "Origin")
+	h.Add("Vary", "Cookie")
+	h.addVaryBytes([]byte("Accept-Encoding"))
+
+	got := h.PeekAll("Vary")
+	lines := make([]string, len(got))
+	for i, v := range got {
+		lines[i] = string(v)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 Vary lines, got %d: %q", len(lines), lines)
+	}
+	if lines[0] != "Origin,Accept-Encoding" {
+		t.Fatalf("unexpected first Vary line %q", lines[0])
+	}
+	if lines[1] != "Cookie" {
+		t.Fatalf("later Vary line was dropped: %q", lines)
+	}
+
+	var buf bytes.Buffer
+	if _, err := h.WriteTo(&buf); err != nil {
+		t.Fatalf("unexpected error when writing header: %v", err)
+	}
+	s := buf.String()
+	if !strings.Contains(s, "Vary: Origin,Accept-Encoding") {
+		t.Fatalf("missing merged first Vary line in %q", s)
+	}
+	if !strings.Contains(s, "Vary: Cookie") {
+		t.Fatalf("later Vary line was dropped in %q", s)
+	}
+}
+
+func TestAddVaryHeaderExistingOnLaterLine(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		later    string
+		expected []string
+	}{
+		{later: "Accept-Encoding", expected: []string{"Origin", "Accept-Encoding"}},
+		{later: "accept-encoding", expected: []string{"Origin", "accept-encoding"}},
+		{later: "Cookie, accept-encoding", expected: []string{"Origin", "Cookie, accept-encoding"}},
+		{later: "X-Accept-Encoding", expected: []string{"Origin,Accept-Encoding", "X-Accept-Encoding"}},
+	} {
+		var h ResponseHeader
+		h.Add("Vary", "Origin")
+		h.Add("Vary", tc.later)
+		h.addVaryBytes([]byte("Accept-Encoding"))
+
+		got := h.PeekAll("Vary")
+		lines := make([]string, len(got))
+		for i, v := range got {
+			lines[i] = string(v)
+		}
+		if !reflect.DeepEqual(lines, tc.expected) {
+			t.Errorf("later line %q: unexpected Vary lines %q, expected %q", tc.later, lines, tc.expected)
+		}
+	}
+}
+
+func TestAddVaryHeaderEmptyValue(t *testing.T) {
+	t.Parallel()
+
+	var h ResponseHeader
+	h.Set("Vary", "")
+	h.addVaryBytes([]byte("Accept-Encoding"))
+
+	if got := string(h.Peek("Vary")); got != "Accept-Encoding" {
+		t.Fatalf("unexpected Vary %q, expected %q", got, "Accept-Encoding")
+	}
+
+	var buf bytes.Buffer
+	if _, err := h.WriteTo(&buf); err != nil {
+		t.Fatalf("unexpected error when writing header: %v", err)
+	}
+	s := buf.String()
+	if !strings.Contains(s, "\r\nVary: Accept-Encoding\r\n") {
+		t.Fatalf("expected Vary: Accept-Encoding in %q", s)
+	}
+	if n := strings.Count(s, "Vary: "); n != 1 {
+		t.Fatalf("Vary occurred %d times in %q", n, s)
+	}
+}
+
+func TestAddVaryHeaderTrailer(t *testing.T) {
+	t.Parallel()
+
+	var h ResponseHeader
+	if err := h.SetTrailer("Vary"); err != nil {
+		t.Fatal(err)
+	}
+	h.Set("Vary", "Origin")
+	h.addVaryBytes([]byte("Accept-Encoding"))
+
+	if got := string(h.TrailerHeader()); got != "Vary: Origin,Accept-Encoding\r\n\r\n" {
+		t.Fatalf("unexpected trailer %q", got)
+	}
+	if s := h.String(); strings.Contains(s, "\r\nVary:") {
+		t.Fatalf("Vary leaked into the header section: %q", s)
 	}
 }
 
@@ -6321,5 +6535,144 @@ func TestResponseHeaderTransferEncodingOnWire(t *testing.T) {
 				t.Fatalf("Transfer-Encoding on wire = %t, want %t:\n%s", got, want, wire)
 			}
 		})
+	}
+}
+
+// The errors of a method that is not a token and of a Transfer-Encoding that
+// fasthttp doesn't read are matched with errors.Is with and without
+// Server.SecureErrorLogMessage, and their text without it is the one it was.
+func TestHeaderReadErrorKinds(t *testing.T) {
+	t.Parallel()
+
+	const (
+		badMethod = "BAD(METHOD / HTTP/1.1\r\nHost: a\r\n\r\n"
+		noMethod  = "FOO\r\nHost: a\r\n\r\n"
+	)
+
+	tests := []struct {
+		name string
+		// raw is what the header is read from. A request starts with a
+		// request line, a response with a status line.
+		raw      string
+		response bool
+		// message is the text of the error without Server.SecureErrorLogMessage,
+		// and secure the error that is returned with it.
+		message string
+		secure  error
+		// is lists what errors.Is has to match in both modes, isNot what it must
+		// not match.
+		is    []error
+		isNot []error
+	}{
+		{
+			name:    "request with a method that is not a token",
+			raw:     badMethod,
+			message: fmt.Sprintf("unsupported http request method %q in %q", "BAD(METHOD", badMethod),
+			secure:  ErrUnsupportedRequestMethod,
+			is:      []error{ErrUnsupportedRequestMethod},
+			isNot:   []error{ErrMissingRequestMethod, ErrUnsupportedTransferEncoding},
+		},
+		{
+			name:    "request without a method",
+			raw:     noMethod,
+			message: fmt.Sprintf("cannot find http request method in %q", noMethod),
+			secure:  ErrMissingRequestMethod,
+			isNot:   []error{ErrUnsupportedRequestMethod},
+		},
+		{
+			name:    "request with a transfer coding that fasthttp doesn't read",
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			message: `unsupported transfer-encoding: "gzip, chunked"`,
+			secure:  ErrUnsupportedTransferEncoding,
+			is:      []error{ErrUnsupportedTransferEncoding},
+			isNot:   []error{ErrUnsupportedRequestMethod},
+		},
+		{
+			name:    "request with chunked that is not the final transfer coding",
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked, identity\r\n\r\n",
+			message: `unsupported transfer-encoding: "chunked, identity"`,
+			secure:  ErrUnsupportedTransferEncoding,
+			is:      []error{ErrUnsupportedTransferEncoding},
+		},
+		{
+			name:    "request with a repeated Transfer-Encoding",
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+			message: "too many transfer-encoding headers",
+			secure:  ErrUnsupportedTransferEncoding,
+			is:      []error{ErrUnsupportedTransferEncoding},
+		},
+		{
+			// The error was the same in both modes already.
+			name:    "HTTP/1.0 request with Transfer-Encoding",
+			raw:     "POST / HTTP/1.0\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+			message: ErrUnsupportedTransferEncoding.Error(),
+			secure:  ErrUnsupportedTransferEncoding,
+			is:      []error{ErrUnsupportedTransferEncoding},
+		},
+		{
+			name:     "response with a transfer coding that fasthttp doesn't read",
+			raw:      "HTTP/1.1 200 OK\r\nTransfer-Encoding: deflate\r\n\r\n",
+			response: true,
+			message:  `unsupported transfer-encoding: "deflate"`,
+			secure:   ErrUnsupportedTransferEncoding,
+			is:       []error{ErrUnsupportedTransferEncoding},
+		},
+		{
+			name:     "response with a repeated Transfer-Encoding",
+			raw:      "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n",
+			response: true,
+			message:  "too many transfer-encoding headers",
+			secure:   ErrUnsupportedTransferEncoding,
+			is:       []error{ErrUnsupportedTransferEncoding},
+		},
+	}
+	for _, tt := range tests {
+		for _, secure := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/secure=%v", tt.name, secure), func(t *testing.T) {
+				t.Parallel()
+
+				// parseErr is the error before Read wraps it with the header block.
+				var parseErr, readErr error
+				br := bufio.NewReader(strings.NewReader(tt.raw))
+				if tt.response {
+					var h ResponseHeader
+					h.secureErrorLogMessage = secure
+					_, parseErr = h.parse([]byte(tt.raw))
+					readErr = h.Read(br)
+				} else {
+					var h RequestHeader
+					h.secureErrorLogMessage = secure
+					_, parseErr = h.parse([]byte(tt.raw))
+					readErr = h.Read(br)
+				}
+
+				if parseErr == nil || readErr == nil {
+					t.Fatalf("expecting errors. parse: %v, Read: %v", parseErr, readErr)
+				}
+				if secure {
+					if parseErr != tt.secure { //nolint:errorlint // the very error is the point
+						t.Fatalf("unexpected error %q. Expecting %q", parseErr, tt.secure)
+					}
+				} else if parseErr.Error() != tt.message {
+					// The text has to stay what it was, people match on it.
+					t.Fatalf("unexpected error text %q. Expecting %q", parseErr, tt.message)
+				}
+				for _, err := range []error{parseErr, readErr} {
+					for _, want := range tt.is {
+						if !errors.Is(err, want) {
+							t.Fatalf("error %q is not %q", err, want)
+						}
+					}
+					if secure && !errors.Is(err, tt.secure) {
+						t.Fatalf("error %q is not %q", err, tt.secure)
+					}
+					for _, notWant := range tt.isNot {
+						if errors.Is(err, notWant) {
+							t.Fatalf("error %q is %q", err, notWant)
+						}
+					}
+				}
+			})
+		}
 	}
 }

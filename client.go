@@ -763,10 +763,10 @@ type DialFuncWithTimeout func(addr string, timeout time.Duration) (net.Conn, err
 // Request argument passed to RetryIfFunc, if there are any request errors.
 type RetryIfFunc func(request *Request) bool
 
-// RetryIfErrFunc defines an interface used for implementing the following functionality:
-// When the client encounters an error during a request, the behavior—whether to retry
-// and whether to reset the request timeout—should be determined
-// based on the return value of this interface.
+// RetryIfErrFunc decides whether to retry a failed request and whether to reset its timeout.
+// The retry loop calls it after a retryable failure while another attempt remains.
+// A request carrying a streaming body uses a single attempt. An eligible retry starts
+// as soon as this function returns, subject to the request timeout.
 //
 // attempt indicates which attempt the current retry is due to a failure of.
 // The first request counts as the first attempt.
@@ -1266,7 +1266,13 @@ var (
 		" please use client instead")
 )
 
-const defaultMaxRedirectsCount = 16
+// DefaultMaxRedirectsCount is the number of redirects that Get, GetTimeout,
+// GetDeadline and Post follow, on a Client, a HostClient and as package
+// functions, before they return ErrTooManyRedirects.
+//
+// DoRedirects follows as many redirects as its caller asks for, and none
+// when that is zero or less.
+const DefaultMaxRedirectsCount = 16
 
 // Only drain response streams that are known to be small. Reading an unknown
 // length stream can block forever (for example, on an event stream), while
@@ -1303,7 +1309,7 @@ func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clie
 	forceResponseBodyBuffering := req.forceResponseBodyBuffering
 	req.forceResponseBodyBuffering = true
 
-	statusCode, _, err = doRequestFollowRedirects(req, resp, url, defaultMaxRedirectsCount, c)
+	statusCode, _, err = doRequestFollowRedirects(req, resp, url, DefaultMaxRedirectsCount, c)
 	req.forceResponseBodyBuffering = forceResponseBodyBuffering
 
 	body = bodyBuf.B
@@ -1357,7 +1363,7 @@ func doRequestFollowRedirects(
 			err = ErrMissingLocation
 			break
 		}
-		if isNonHTTPRedirect(location) {
+		if HasNonHTTPSchemeWithoutAuthority(location) {
 			// There is nothing to fetch for mailto:, tel: or an app callback
 			// such as com.example.app:/cb, so return the redirect response
 			// as is and leave the location to the caller.
@@ -1423,10 +1429,19 @@ func doRequestFollowRedirects(
 	return statusCode, body, err
 }
 
-// isNonHTTPRedirect reports whether location has a scheme other than http
-// or https and no authority, e.g. mailto:user@example.com.
-// URI can't hold such a location and would resolve it as a relative path.
-func isNonHTTPRedirect(location []byte) bool {
+// HasNonHTTPSchemeWithoutAuthority reports whether location, the value of a
+// Location header, has a scheme other than http or https and no authority, e.g.
+// mailto:user@example.com or com.example.app:/callback.
+//
+// There is nothing to fetch at such a location, and URI can't hold it: Update
+// and UpdateBytes would resolve it as a relative path. Client and HostClient
+// return the redirect response as it is instead of following it, and so
+// should code that follows redirects itself, before it resolves location
+// against the uri it requested.
+//
+// A location with an authority, such as ftp://example.com/, has a scheme other
+// than http or https too, but URI can hold it, so the result is false for it.
+func HasNonHTTPSchemeWithoutAuthority(location []byte) bool {
 	if !hasSchemeWithoutAuthority(b2s(location)) {
 		return false
 	}
@@ -2545,6 +2560,13 @@ func AddMissingPort(addr string, isTLS bool) string {
 	addrLen := len(addr)
 	if addrLen == 0 {
 		return addr
+	}
+
+	// An empty port ("host:", "[::1]:") is a missing one, see RFC 3986, section 3.2.3.
+	// An unbracketed IPv6 address such as "::" has more than one colon and is kept as is.
+	if addrLen > 1 && addr[addrLen-1] == ':' && (addr[addrLen-2] == ']' || strings.IndexByte(addr, ':') == addrLen-1) {
+		addr = addr[:addrLen-1]
+		addrLen--
 	}
 
 	isIP6 := addr[0] == '['

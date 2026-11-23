@@ -570,6 +570,10 @@ func TestRequestCtxRedirect(t *testing.T) {
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "#aaa", "http://qqq/foo/bar?baz=111#aaa")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "?abc=de&f", "http://qqq/foo/bar?abc=de&f")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "?abc=de&f#sf", "http://qqq/foo/bar?abc=de&f#sf")
+	testRequestCtxRedirect(t, "http://qqq/path?old=1#before", "?next=2#", "http://qqq/path?next=2#")
+	testRequestCtxRedirect(t, "http://qqq/path?old=1#before", "?#new", "http://qqq/path?#new")
+	testRequestCtxRedirect(t, "http://qqq/path?old=1#before", "?#", "http://qqq/path?#")
+	testRequestCtxRedirect(t, "http://qqq/path?old=1", "?", "http://qqq/path?")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "?\r\nInjected: yes", "http://qqq/foo/bar?  Injected: yes")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "x.html", "http://qqq/foo/x.html")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "x.html?a=1", "http://qqq/foo/x.html?a=1")
@@ -3004,6 +3008,30 @@ func TestServerDisableHeaderNamesNormalizing(t *testing.T) {
 	}
 }
 
+func TestServerHeaderNamesNormalizingDisabled(t *testing.T) {
+	t.Parallel()
+
+	for _, disable := range []bool{false, true} {
+		var req, resp bool
+		s := &Server{
+			Handler: func(ctx *RequestCtx) {
+				req = ctx.Request.Header.NormalizingDisabled()
+				resp = ctx.Response.Header.NormalizingDisabled()
+			},
+			DisableHeaderNamesNormalizing: disable,
+		}
+
+		rw := &readWriter{}
+		rw.r.WriteString("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")
+		if err := s.ServeConn(rw); err != nil {
+			t.Fatalf("disable=%v: unexpected error from ServeConn: %v", disable, err)
+		}
+		if req != disable || resp != disable {
+			t.Fatalf("disable=%v: NormalizingDisabled is %v for the request and %v for the response headers", disable, req, resp)
+		}
+	}
+}
+
 func TestServerReduceMemoryUsageSerial(t *testing.T) {
 	t.Parallel()
 
@@ -4426,6 +4454,77 @@ func TestCompressHandlerVary(t *testing.T) {
 	}
 	if string(body) != expectedBody {
 		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
+	}
+}
+
+func TestCompressHandlerKeepsAdditionalVaryLines(t *testing.T) {
+	t.Parallel()
+
+	h := CompressHandler(func(ctx *RequestCtx) {
+		ctx.Response.Header.Add("Vary", "Origin")
+		ctx.Response.Header.Add("Vary", "Cookie")
+		ctx.SetBodyString(strings.Repeat("private ", 100))
+	})
+
+	var ctx RequestCtx
+	ctx.Request.Header.Set("Accept-Encoding", "gzip")
+	h(&ctx)
+
+	got := ctx.Response.Header.PeekAll("Vary")
+	lines := make([]string, len(got))
+	for i, v := range got {
+		lines[i] = string(v)
+	}
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "Cookie") {
+		t.Fatalf("later Vary line was dropped: %q", lines)
+	}
+	if !strings.Contains(joined, "Origin") {
+		t.Fatalf("missing Origin in Vary: %q", lines)
+	}
+	if !strings.Contains(joined, "Accept-Encoding") {
+		t.Fatalf("missing Accept-Encoding in Vary: %q", lines)
+	}
+	if string(ctx.Response.Header.ContentEncoding()) != "gzip" {
+		t.Fatalf("expected gzip, got %q", ctx.Response.Header.ContentEncoding())
+	}
+}
+
+func TestCompressHandlerVaryTrailer(t *testing.T) {
+	t.Parallel()
+
+	h := CompressHandler(func(ctx *RequestCtx) {
+		if err := ctx.Response.Header.SetTrailer("Vary"); err != nil {
+			t.Error(err)
+		}
+		ctx.Response.Header.Set("Vary", "Origin")
+		ctx.SetBodyStreamWriter(func(w *bufio.Writer) {
+			fmt.Fprint(w, strings.Repeat("private ", 100))
+		})
+	})
+
+	var ctx RequestCtx
+	ctx.Request.Header.Set("Accept-Encoding", "gzip")
+	h(&ctx)
+
+	var buf bytes.Buffer
+	bw := bufio.NewWriter(&buf)
+	if err := ctx.Response.Write(bw); err != nil {
+		t.Fatal(err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+
+	var resp Response
+	if err := resp.Read(bufio.NewReader(&buf)); err != nil {
+		t.Fatal(err)
+	}
+	if ce := string(resp.Header.ContentEncoding()); ce != "gzip" {
+		t.Fatalf("expected gzip, got %q", ce)
+	}
+	if got := string(resp.Header.TrailerHeader()); got != "Vary: Origin,Accept-Encoding\r\n\r\n" {
+		t.Fatalf("unexpected trailer %q", got)
 	}
 }
 
@@ -9744,5 +9843,117 @@ func TestServerReduceMemoryUsageKeepBodyBufferConnectionLifecycle(t *testing.T) 
 	}
 	if handledCtx.Response.body != nil {
 		t.Fatalf("expected handledCtx.Response.body to be nil after connection closed")
+	}
+}
+
+// An ErrorHandler can tell the errors of a method that is not a token and of a
+// Transfer-Encoding that fasthttp doesn't read from the other bad requests with
+// errors.Is, with or without SecureErrorLogMessage. Which status it answers is
+// its own choice: this one answers 400 for all of them, as Server does.
+func TestServerErrorHandlerHeaderErrorKinds(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  string
+		// matches is the sentinel that errors.Is has to match on the error that
+		// the ErrorHandler gets, and nil for an error that matches neither.
+		matches error
+	}{
+		{
+			// The method is a token, and a parenthesis is not a character of one.
+			name:    "method that is not a token",
+			raw:     "BAD(METHOD / HTTP/1.1\r\nHost: example.com\r\n\r\n",
+			matches: ErrUnsupportedRequestMethod,
+		},
+		{
+			name: "missing method",
+			raw:  "FOO\r\nHost: example.com\r\n\r\n",
+		},
+		{
+			name:    "transfer coding that fasthttp doesn't read",
+			raw:     "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			matches: ErrUnsupportedTransferEncoding,
+		},
+		{
+			name:    "repeated transfer-encoding",
+			raw:     "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+			matches: ErrUnsupportedTransferEncoding,
+		},
+	}
+	for _, tt := range tests {
+		for _, secure := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/secure=%v", tt.name, secure), func(t *testing.T) {
+				t.Parallel()
+
+				var handlerErr error
+				s := &Server{
+					Handler:               func(ctx *RequestCtx) {},
+					SecureErrorLogMessage: secure,
+					ErrorHandler: func(ctx *RequestCtx, err error) {
+						handlerErr = err
+						ctx.SetStatusCode(StatusBadRequest)
+					},
+				}
+
+				rw := &readWriter{}
+				rw.r.WriteString(tt.raw)
+				if err := s.ServeConn(rw); err == nil {
+					t.Fatal("expecting an error from ServeConn")
+				}
+
+				var resp Response
+				if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got := resp.StatusCode(); got != StatusBadRequest {
+					t.Fatalf("unexpected status code %d. Expecting %d, from the ErrorHandler", got, StatusBadRequest)
+				}
+				if handlerErr == nil {
+					t.Fatal("the ErrorHandler didn't get an error")
+				}
+				for _, sentinel := range []error{ErrUnsupportedRequestMethod, ErrUnsupportedTransferEncoding} {
+					if got, want := errors.Is(handlerErr, sentinel), sentinel == tt.matches; got != want { //nolint:errorlint // which sentinel the row names
+						t.Fatalf("errors.Is(%q, %q) = %v. Expecting %v", handlerErr, sentinel, got, want)
+					}
+				}
+			})
+		}
+	}
+}
+
+// A method that is a token reaches the Handler, whether the application knows it
+// or not: Server doesn't reject it, and the application decides whether to
+// answer 501 (Not Implemented, RFC 9110, section 9.1).
+func TestServerExtensionMethodReachesHandler(t *testing.T) {
+	t.Parallel()
+
+	var methods []string
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			methods = append(methods, string(ctx.Method()))
+			// The application doesn't implement the method, and says so.
+			ctx.SetStatusCode(StatusNotImplemented)
+		},
+		ErrorHandler: func(ctx *RequestCtx, err error) {
+			t.Errorf("unexpected call of the ErrorHandler with %q", err)
+			ctx.SetStatusCode(StatusBadRequest)
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("BREW / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(methods) != 1 || methods[0] != "BREW" {
+		t.Fatalf("the Handler got the methods %q. Expecting [\"BREW\"]", methods)
+	}
+	var resp Response
+	if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := resp.StatusCode(); got != StatusNotImplemented {
+		t.Fatalf("unexpected status code %d. Expecting %d, from the Handler", got, StatusNotImplemented)
 	}
 }

@@ -394,12 +394,12 @@ func (h *RequestHeader) setRawBodyFraming(contentLength int, hasBody bool) error
 
 func (h *ResponseHeader) isCompressibleContentType() bool {
 	contentType := h.ContentType()
-	return bytes.HasPrefix(contentType, strTextSlash) ||
-		bytes.HasPrefix(contentType, strApplicationSlash) ||
-		bytes.HasPrefix(contentType, strImageSVG) ||
-		bytes.HasPrefix(contentType, strImageIcon) ||
-		bytes.HasPrefix(contentType, strFontSlash) ||
-		bytes.HasPrefix(contentType, strMultipartSlash)
+	return caseInsensitiveHasPrefix(contentType, strTextSlash) ||
+		caseInsensitiveHasPrefix(contentType, strApplicationSlash) ||
+		caseInsensitiveHasPrefix(contentType, strImageSVG) ||
+		caseInsensitiveHasPrefix(contentType, strImageIcon) ||
+		caseInsensitiveHasPrefix(contentType, strFontSlash) ||
+		caseInsensitiveHasPrefix(contentType, strMultipartSlash)
 }
 
 // ContentType returns Content-Type header value.
@@ -436,16 +436,42 @@ func (h *ResponseHeader) SetContentEncodingBytes(contentEncoding []byte) {
 	h.contentEncoding = initHeaderValueBytes(h.contentEncoding, contentEncoding)
 }
 
-// addVaryBytes add value to the 'Vary' header if it's not included.
+// addVaryBytes adds value to the Vary header if it is not already present.
+// Set would replace every existing Vary line, so the first line in the
+// section Vary is written to (the trailer section once Vary is announced as
+// a trailer) is extended in place and any additional lines are kept.
 func (h *ResponseHeader) addVaryBytes(value []byte) {
-	v := h.peek(strVary)
-	if len(v) == 0 {
-		// 'Vary' is not set
-		h.SetBytesV(HeaderVary, value)
-	} else if !bytes.Contains(v, value) {
-		// 'Vary' is set and not contains target value
-		h.SetBytesV(HeaderVary, append(append(v, ','), value...))
-	} // else: 'Vary' is set and contains target value
+	if hasVaryValue(h.h, value) || hasVaryValue(h.trailerH, value) {
+		return
+	}
+	section := h.h
+	if h.isTrailerKey(strVary) {
+		section = h.trailerH
+	}
+	for i := range section {
+		kv := &section[i]
+		if !caseInsensitiveCompare(kv.key, strVary) {
+			continue
+		}
+		if len(kv.value) > 0 {
+			kv.value = append(kv.value, ',')
+		}
+		kv.value = append(kv.value, value...)
+		kv.noValue = false
+		return
+	}
+	h.SetBytesV(HeaderVary, value)
+}
+
+// hasVaryValue reports whether any Vary line in kvs lists the field name
+// value, compared case-insensitively as a whole list element.
+func hasVaryValue(kvs []argsKV, value []byte) bool {
+	for i := range kvs {
+		if caseInsensitiveCompare(kvs[i].key, strVary) && hasHeaderValue(kvs[i].value, value) {
+			return true
+		}
+	}
+	return false
 }
 
 // Server returns Server header value.
@@ -794,6 +820,10 @@ func (h *RequestHeader) AddTrailer(trailer string) error {
 	return h.AddTrailerBytes(s2b(trailer))
 }
 
+// With or without Server.SecureErrorLogMessage, errors.Is matches
+// ErrUnsupportedRequestMethod to the error of a request line whose method is not
+// a token, and ErrUnsupportedTransferEncoding to the error of a
+// Transfer-Encoding that fasthttp doesn't read, a repeated one included.
 var (
 	ErrBadTrailer                    = errors.New("fasthttp: contain forbidden trailer")
 	ErrReadingResponseHeaders        = errors.New("fasthttp: error when reading response headers")
@@ -810,6 +840,22 @@ var (
 	ErrNeedMore                      = errors.New("fasthttp: need more data: cannot find trailing lf")
 	ErrSmallReadBuffer               = errors.New("fasthttp: small read buffer. increase readbuffersize")
 )
+
+// classifiedError is a header error with a detailed message that errors.Is
+// matches to the sentinel err, so that callers don't have to match the text.
+// The message is the one the error had before it was classified.
+type classifiedError struct {
+	err error
+	msg string
+}
+
+func (e *classifiedError) Error() string { return e.msg }
+
+func (e *classifiedError) Unwrap() error { return e.err }
+
+func classifiedErrorf(err error, format string, args ...any) error {
+	return &classifiedError{err: err, msg: fmt.Sprintf(format, args...)}
+}
 
 // AddTrailerBytes add Trailer header value for chunked response
 // to indicate which headers will be sent after the body.
@@ -1336,8 +1382,25 @@ func (h *RequestHeader) HasAcceptEncoding(acceptEncoding string) bool {
 // except that a coding with a quality value of 0 is not acceptable.
 // See https://www.rfc-editor.org/rfc/rfc9110.html#section-12.5.3 for details.
 func (h *RequestHeader) HasAcceptEncodingBytes(acceptEncoding []byte) bool {
+	// The field may be sent on several lines, which together form one list.
+	found := false
+	for i := range h.h {
+		if !bytes.Equal(h.h[i].key, strAcceptEncoding) {
+			continue
+		}
+		if hasAcceptEncodingValue(h.h[i].value, acceptEncoding) {
+			return true
+		}
+		found = true
+	}
+	return !found && hasAcceptEncodingValue(peekArgBytes(h.trailerH, strAcceptEncoding), acceptEncoding)
+}
+
+// hasAcceptEncodingValue reports whether the Accept-Encoding field value b
+// lists acceptEncoding as acceptable.
+func hasAcceptEncodingValue(b, acceptEncoding []byte) bool {
 	var vs headerValueScanner
-	vs.b = h.peek(strAcceptEncoding)
+	vs.b = b
 	for vs.next() {
 		v := vs.value
 		if len(v) < len(acceptEncoding) || !caseInsensitiveCompare(v[:len(acceptEncoding)], acceptEncoding) {
@@ -1459,6 +1522,18 @@ func (h *header) EnableNormalizing() bool {
 	orig := h.disableNormalizing
 	h.disableNormalizing = false
 	return orig
+}
+
+// NormalizingDisabled reports whether header names' normalization is
+// disabled, whether by DisableNormalizing, by Server.DisableHeaderNamesNormalizing
+// for the headers of a request being served, or by the
+// DisableHeaderNamesNormalizing option of a client for the response headers
+// it reads.
+//
+// The setting says how names are stored and looked up from now on. Names that
+// are already stored keep the spelling they were stored with.
+func (h *header) NormalizingDisabled() bool {
+	return h.disableNormalizing
 }
 
 // SetNoDefaultContentType allows you to control if a default Content-Type header will be set (false) or not (true).
@@ -2684,8 +2759,10 @@ func (h *ResponseHeader) peekAll(key []byte) [][]byte {
 			h.mulHeader = append(h.mulHeader, h.contentLengthBytes)
 		}
 	case HeaderSetCookie:
-		if len(h.cookies) > 0 {
-			h.mulHeader = append(h.mulHeader, appendResponseCookieBytes(nil, h.cookies))
+		// One value per Set-Cookie line: joined, a cookie reads as an
+		// attribute of the one before it.
+		for i := range h.cookies {
+			h.mulHeader = append(h.mulHeader, h.cookies[i].value)
 		}
 	case HeaderTrailer:
 		if len(h.trailer) > 0 {
@@ -3669,10 +3746,14 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 			return 0, fmt.Errorf("cannot find http request method in %q", buf)
 		}
 		if !isValidMethod(b[:n]) {
+			// The method is not a token (RFC 9112, section 3), which is a 400. A
+			// method that is a token reaches the Handler, whether the application
+			// knows it or not, and the Handler decides whether to answer 501 (Not
+			// Implemented, RFC 9110, section 9.1).
 			if h.secureErrorLogMessage {
 				return 0, ErrUnsupportedRequestMethod
 			}
-			return 0, fmt.Errorf("unsupported http request method %q in %q", b[:n], buf)
+			return 0, classifiedErrorf(ErrUnsupportedRequestMethod, "unsupported http request method %q in %q", b[:n], buf)
 		}
 	}
 	h.method = append(h.method[:0], b[:n]...)
@@ -3838,7 +3919,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 					if h.secureErrorLogMessage {
 						return 0, ErrUnsupportedTransferEncoding
 					}
-					return 0, errors.New("too many transfer-encoding headers")
+					return 0, classifiedErrorf(ErrUnsupportedTransferEncoding, "too many transfer-encoding headers")
 				}
 				transferEncodingSeen = true
 				if !caseInsensitiveCompare(s.value, strChunked) {
@@ -3846,7 +3927,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 					if h.secureErrorLogMessage {
 						return 0, ErrUnsupportedTransferEncoding
 					}
-					return 0, fmt.Errorf("unsupported transfer-encoding: %q", s.value)
+					return 0, classifiedErrorf(ErrUnsupportedTransferEncoding, "unsupported transfer-encoding: %q", s.value)
 				}
 				h.contentLength = -1
 				h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
@@ -3957,7 +4038,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 					if h.secureErrorLogMessage {
 						return 0, 0, ErrUnsupportedTransferEncoding
 					}
-					return 0, 0, errors.New("too many transfer-encoding headers")
+					return 0, 0, classifiedErrorf(ErrUnsupportedTransferEncoding, "too many transfer-encoding headers")
 				}
 				transferEncodingSeen = true
 			}
@@ -4026,7 +4107,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 					if h.secureErrorLogMessage {
 						return 0, 0, ErrUnsupportedTransferEncoding
 					}
-					return 0, 0, fmt.Errorf("unsupported transfer-encoding: %q", s.value)
+					return 0, 0, classifiedErrorf(ErrUnsupportedTransferEncoding, "unsupported transfer-encoding: %q", s.value)
 				}
 
 				if isChunked {
