@@ -8,6 +8,7 @@ import (
 
 type headerScanner struct {
 	initialized bool
+	request     bool // apply request header termination rules
 
 	b []byte
 	r int
@@ -38,6 +39,8 @@ type headerScanner struct {
 	err error
 }
 
+var errInvalidRequestHeaderTerminator = errors.New("invalid request header terminator: expected CRLFCRLF")
+
 func (s *headerScanner) next() bool {
 	if !s.initialized {
 		if bytes.HasPrefix(s.b, strCRLF) {
@@ -66,26 +69,14 @@ func (s *headerScanner) next() bool {
 			return false
 		}
 		if b[r+1] == '\n' {
-			// The block still has to carry a CRLFCRLF, or a peer that only
-			// accepts that terminator would frame the stream differently.
-			// The line before this one ending in CRLF puts one right here.
-			if (r >= 2 && b[r-1] == '\n' && b[r-2] == '\r') || s.blockComplete() {
+			if r >= 2 && b[r-1] == '\n' && b[r-2] == '\r' {
 				s.r = r + 2
 				return false
 			}
-			s.err = ErrNeedMore
-			return false
+			return s.endMixedLineBlock(r + 2)
 		}
 	case '\n':
-		// A bare-LF blank line ends the block, but only when the block is
-		// really terminated by CRLFCRLF; otherwise more data may still turn
-		// it into one.
-		if s.blockComplete() {
-			s.r = r + 1
-			return false
-		}
-		s.err = ErrNeedMore
-		return false
+		return s.endMixedLineBlock(r + 1)
 	}
 	i := r
 	seenSpace := false
@@ -151,12 +142,51 @@ func (s *headerScanner) next() bool {
 	return true
 }
 
-// blockComplete reports whether the header block terminator is present.
+// endMixedLineBlock handles a blank line without a CRLFCRLF at the boundary.
+func (s *headerScanner) endMixedLineBlock(end int) bool {
+	switch {
+	case s.request:
+		s.err = errInvalidRequestHeaderTerminator
+	case s.blockComplete():
+		s.r = end
+	default:
+		s.err = ErrNeedMore
+	}
+	return false
+}
+
+// requestHeaderBlockEnd finds the first blank line, including invalid
+// terminators, so parsing can decide at that boundary. On a retry, start
+// skips bytes already searched for LF. The bytes before each LF determine
+// whether the line is blank, even if they arrived in an earlier read.
+func requestHeaderBlockEnd(b []byte, start int) int {
+	for start < len(b) {
+		i := bytes.IndexByte(b[start:], '\n')
+		if i < 0 {
+			break
+		}
+		start += i + 1
+		lineEnd := start - 1
+		if lineEnd > 0 && b[lineEnd-1] == '\r' {
+			lineEnd--
+		}
+		if lineEnd == 0 || b[lineEnd-1] == '\n' {
+			return start
+		}
+	}
+	return 0
+}
+
+// blockComplete reports whether parsing can reach the end of the header block.
 // The search runs at most once per scan: b is fixed for its duration, and a
 // fold only ever rewrites bytes it has already consumed.
 func (s *headerScanner) blockComplete() bool {
 	if s.blockEnd != 0 {
 		return true
+	}
+	if s.request {
+		s.blockEnd = requestHeaderBlockEnd(s.b, 0)
+		return s.blockEnd != 0
 	}
 	i := bytes.Index(s.b, strCRLFCRLF)
 	if i < 0 {

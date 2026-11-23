@@ -3085,15 +3085,16 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 		return fmt.Errorf("error when reading request headers: %w", err)
 	}
 	b = mustPeekBuffered(r)
-	if n > 1 && !h.blockTerminated(b) {
+	if n > 1 {
 		// A retry reparses the whole block, so it waits for the terminator;
-		// the request line is still checked as soon as it is complete, and an
-		// empty block is complete at its CRLF.
+		// the request line is still checked as soon as it is complete.
 		m, errParse := h.parseFirstLine(b)
 		if errParse != nil {
 			return headerError("request", err, errParse, b, h.secureErrorLogMessage)
 		}
-		if !emptyHeaderBlock(b[m:]) {
+		block := b[m:]
+		if requestHeaderBlockEnd(block, h.terminatorSearched) == 0 {
+			h.terminatorSearched = len(block)
 			return headerError("request", err, ErrNeedMore, b, h.secureErrorLogMessage)
 		}
 	}
@@ -3981,6 +3982,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 	var s headerScanner
 	s.b = buf
 	s.raw = &h.rawHeaders
+	s.request = true
 	var trailers trailerSet
 
 	for s.next() {
