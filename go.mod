@@ -3,7 +3,7 @@ module github.com/valyala/fasthttp
 go 1.26.0
 
 require (
-	github.com/klauspost/compress v1.20.4
+	github.com/klauspost/compress v1.20.5
 	github.com/molecule-man/go-brrr v1.3.1
 	github.com/valyala/bytebufferpool v1.0.0
 	golang.org/x/crypto v0.59.0
