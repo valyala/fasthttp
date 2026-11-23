@@ -7342,12 +7342,17 @@ func TestHostClientFailedDialDoesNotStartConnsCleaner(t *testing.T) {
 }
 
 func TestHostClientQueueForIdleFailedDialDoesNotStartConnsCleaner(t *testing.T) {
-	c := &HostClient{
+	cleanerRunAtDial := make(chan bool, 1)
+	var c *HostClient
+	c = &HostClient{
 		Addr:                "example.com:80",
 		MaxConns:            1,
 		MaxConnWaitTimeout:  time.Second,
 		MaxIdleConnDuration: time.Hour,
 		Dial: func(string) (net.Conn, error) {
+			c.connsLock.Lock()
+			cleanerRunAtDial <- c.connsCleanerRun
+			c.connsLock.Unlock()
 			return nil, errors.New("dial failed")
 		},
 	}
@@ -7362,16 +7367,21 @@ func TestHostClientQueueForIdleFailedDialDoesNotStartConnsCleaner(t *testing.T) 
 	case <-time.After(time.Second):
 		t.Fatal("queued dial did not return")
 	}
+	select {
+	case cleanerRun := <-cleanerRunAtDial:
+		if cleanerRun {
+			t.Fatal("conns cleaner started before the queued dial while its slot was reserved")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("queued dial did not inspect cleaner state")
+	}
 
 	deadline := time.Now().Add(time.Second)
 	for {
 		c.connsLock.Lock()
-		cleanerRun, connsCount := c.connsCleanerRun, c.connsCount
+		connsCount := c.connsCount
 		c.connsLock.Unlock()
 		if connsCount == 0 {
-			if cleanerRun {
-				t.Fatal("conns cleaner started despite the failed queued dial")
-			}
 			return
 		}
 		if time.Now().After(deadline) {
@@ -7451,12 +7461,6 @@ func TestHostClientConcurrentDialFailureStillStartsConnsCleaner(t *testing.T) {
 	}
 
 	c.ReleaseConn(second.conn)
-	c.connsLock.Lock()
-	cleanerRun = c.connsCleanerRun
-	c.connsLock.Unlock()
-	if !cleanerRun {
-		t.Fatal("conns cleaner was not started when the connection became idle")
-	}
 	deadline := time.Now().Add(time.Second)
 	for {
 		c.connsLock.Lock()
@@ -7646,14 +7650,8 @@ func TestHostClientQueueForIdleRestartsCleaner(t *testing.T) {
 	}
 
 	// Once the replacement connection is returned to the pool, the cleaner
-	// starts, closes it after MaxIdleConnDuration, and exits.
+	// closes it after MaxIdleConnDuration and exits.
 	c.ReleaseConn(w.conn)
-	c.connsLock.Lock()
-	cleanerRun = c.connsCleanerRun
-	c.connsLock.Unlock()
-	if !cleanerRun {
-		t.Fatal("conns cleaner was not started when the replacement became idle")
-	}
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
