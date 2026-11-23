@@ -3320,6 +3320,32 @@ func (c *hijackConn) UnsafeConn() net.Conn {
 	return c.Conn
 }
 
+// UnwrappedConn returns the connection under the one UnsafeConn returns if
+// that is this server's wrapper for MaxConnsPerIP or ProxyProtocol, and nil
+// otherwise.
+func (c *hijackConn) UnwrappedConn() net.Conn {
+	switch w := c.Conn.(type) {
+	case *perIPConn:
+		if w.perIPConnCounter == &c.s.perIPConnCounter {
+			return w.Conn
+		}
+	case *perIPTLSConn:
+		if w.perIPConnCounter == &c.s.perIPConnCounter {
+			return w.Conn
+		}
+	// With ProxyProtocol the server wraps every connection it serves.
+	case *proxyConn:
+		if c.s.ProxyProtocol {
+			return w.Conn
+		}
+	case *proxyTLSConn:
+		if c.s.ProxyProtocol {
+			return w.Conn
+		}
+	}
+	return nil
+}
+
 func (c *hijackConn) Read(p []byte) (int, error) {
 	return c.r.Read(p)
 }

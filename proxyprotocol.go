@@ -257,12 +257,6 @@ func (c *proxyTLSConn) NetConn() net.Conn {
 	return c.Conn.(netConner).NetConn() //nolint:forcetypeassert
 }
 
-// WrappedConn returns the connection the wrapper is around, as perIPConn's
-// does.
-func (c *proxyConn) WrappedConn() net.Conn {
-	return c.Conn
-}
-
 func (c *proxyConn) RemoteAddr() net.Addr {
 	if a := c.addrs.Load(); a != nil {
 		return a.remote

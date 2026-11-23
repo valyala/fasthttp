@@ -48,6 +48,12 @@ func startServerWith(t testing.TB, opts *AcceptOptions, h func(*Conn), configure
 	if err != nil {
 		t.Fatal(err)
 	}
+	return startServerOn(t, ln, opts, h, configure)
+}
+
+// startServerOn serves h on ln, as startServerWith does on a TCP listener.
+func startServerOn(t testing.TB, ln net.Listener, opts *AcceptOptions, h func(*Conn), configure func(*fasthttp.Server)) *testServer {
+	t.Helper()
 	s := &fasthttp.Server{
 		Handler: func(ctx *fasthttp.RequestCtx) {
 			_ = Accept(ctx, opts, h)

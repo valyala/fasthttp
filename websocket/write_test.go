@@ -11,9 +11,11 @@ import (
 	"runtime"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
@@ -408,6 +410,68 @@ func TestVectoredWriteReleasesPayload(t *testing.T) {
 	}
 	if c.iovBuf[1] != nil {
 		t.Fatal("a failed vectored write retained the payload")
+	}
+}
+
+// countingConn is a caller's connection that counts the bytes written to it.
+// Its methods share names with ones looked for on fasthttp's connections.
+type countingConn struct {
+	net.Conn
+
+	n *atomic.Int64
+}
+
+func (c countingConn) Write(p []byte) (int, error) {
+	n, err := c.Conn.Write(p)
+	c.n.Add(int64(n))
+	return n, err
+}
+
+func (c countingConn) WrappedConn() net.Conn   { return c.Conn }
+func (c countingConn) UnwrappedConn() net.Conn { return c.Conn }
+
+type countingListener struct {
+	net.Listener
+
+	n *atomic.Int64
+}
+
+func (ln countingListener) Accept() (net.Conn, error) {
+	c, err := ln.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return countingConn{Conn: c, n: ln.n}, nil
+}
+
+// A large frame goes through the Write of a caller's connection, also under
+// the server's wrapper for MaxConnsPerIP.
+func TestVectoredWriteKeepsCallersConn(t *testing.T) {
+	payload := bytes.Repeat([]byte{'v'}, 16<<10)
+	for _, maxConnsPerIP := range []int{0, 1} {
+		t.Run("MaxConnsPerIP="+strconv.Itoa(maxConnsPerIP), func(t *testing.T) {
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var written atomic.Int64
+			wrote := make(chan int64, 1)
+			ts := startServerOn(t, countingListener{Listener: ln, n: &written}, nil, func(c *Conn) {
+				before := written.Load()
+				if err := c.Write(context.Background(), MessageBinary, payload); err != nil {
+					t.Error(err)
+				}
+				wrote <- written.Load() - before
+			}, func(s *fasthttp.Server) { s.MaxConnsPerIP = maxConnsPerIP })
+			c := ts.dial(t, nil)
+			if _, p, err := c.Read(t.Context()); err != nil || !bytes.Equal(p, payload) {
+				t.Fatalf("read %d bytes: %v", len(p), err)
+			}
+			// The frame's header takes 4 bytes.
+			if n := <-wrote; n != 4+int64(len(payload)) {
+				t.Fatalf("the connection's Write took %d bytes", n)
+			}
+		})
 	}
 }
 

@@ -484,6 +484,37 @@ func TestServerProxyProtocolMaxConnsPerIPDeadline(t *testing.T) {
 	})
 }
 
+// A hijacked connection shows what is under a wrapper of its own server only.
+func TestHijackConnUnwrappedConn(t *testing.T) {
+	t.Parallel()
+
+	inner, peer := net.Pipe()
+	defer inner.Close()
+	defer peer.Close()
+	tlsInner := tls.Server(inner, &tls.Config{})
+	s, other, proxy := &Server{}, &Server{}, &Server{ProxyProtocol: true}
+	for i, tt := range []struct {
+		s    *Server
+		c    net.Conn
+		want net.Conn
+	}{
+		{s: s, c: inner},
+		{s: s, c: newPerIPConn(inner, perIPKey{}, &s.perIPConnCounter), want: inner},
+		{s: s, c: newPerIPConn(inner, perIPKey{}, &other.perIPConnCounter)},
+		{s: s, c: newPerIPConn(tlsInner, perIPKey{}, &s.perIPConnCounter), want: tlsInner},
+		{s: s, c: newPerIPConn(tlsInner, perIPKey{}, &other.perIPConnCounter)},
+		{s: proxy, c: newProxyConn(inner), want: inner},
+		{s: s, c: newProxyConn(inner)},
+		{s: proxy, c: newProxyConn(tlsInner), want: tlsInner},
+		{s: s, c: newProxyConn(tlsInner)},
+	} {
+		hjc := &hijackConn{Conn: tt.c, s: tt.s}
+		if got := hjc.UnwrappedConn(); got != tt.want {
+			t.Errorf("%d: %T under %T, want %T", i, got, tt.c, tt.want)
+		}
+	}
+}
+
 // testProxyDeadlineConn turns EOF into a read timeout while a read deadline
 // is set.
 type testProxyDeadlineConn struct {
