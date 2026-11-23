@@ -1943,6 +1943,10 @@ func (resp *Response) readLimitBody(r *bufio.Reader, maxBodySize int, head, conn
 		if err != nil {
 			return err
 		}
+	} else if resp.Header.ContentLength() == -2 && !resp.headResponse && !resp.isConnectTunnel() && !resp.Header.mustSkipContentLength() {
+		// Only SkipBody keeps this body from being read. It still ends at EOF,
+		// so the connection can't be reused, as in ReadBody.
+		resp.Header.SetConnectionClose()
 	}
 
 	// A response without a body can't have trailers.

@@ -180,6 +180,50 @@ func TestHostClientConnectionUpgradeEOFBodyNotReused(t *testing.T) {
 	}
 }
 
+func TestClientConnectionUpgradeEOFBodySkipBodyConnectionClose(t *testing.T) {
+	t.Parallel()
+
+	dialer := func() (func(string) (net.Conn, error), func()) {
+		ln := fasthttputil.NewInmemoryListener()
+		go func() {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			var req Request
+			if err := req.Read(bufio.NewReader(conn)); err != nil {
+				t.Error(err)
+				return
+			}
+			// No Content-Length and not chunked: the body ends at EOF.
+			wire := "HTTP/1.1 200 OK\r\nConnection: keep-alive\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\nfoobar"
+			_, _ = conn.Write([]byte(wire))
+		}()
+		return func(string) (net.Conn, error) { return ln.Dial() }, func() { ln.Close() }
+	}
+
+	hostDial, hostClose := dialer()
+	defer hostClose()
+	pipelineDial, pipelineClose := dialer()
+	defer pipelineClose()
+	for name, do := range map[string]func(*Request, *Response) error{
+		"HostClient":     (&HostClient{Addr: "example.com", Dial: hostDial}).Do,
+		"PipelineClient": (&PipelineClient{Addr: "example.com", Dial: pipelineDial}).Do,
+	} {
+		var req Request
+		var resp Response
+		resp.SkipBody = true
+		req.SetRequestURI("http://example.com/")
+		if err := do(&req, &resp); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !resp.ConnectionClose() {
+			t.Errorf("%s: expecting 'Connection: close' on a response with a body that ends at EOF", name)
+		}
+	}
+}
+
 func TestHostClientConnectionUpgradeHeadResponseReused(t *testing.T) {
 	t.Parallel()
 
