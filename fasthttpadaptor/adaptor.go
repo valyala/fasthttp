@@ -147,8 +147,11 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				// From net/http.ResponseWriter.Write:
 				// If the Header does not contain a Content-Type line, Write adds a Content-Type set
 				// to the result of passing the initial 512 bytes of written data to DetectContentType.
+				// An encoded body is not sniffed there, and gets no Content-Type.
 				l := min(len(w.responseBody), 512)
-				if l > 0 {
+				if f.encoded {
+					ctx.Response.Header.SetNoDefaultContentType(true)
+				} else if l > 0 {
 					ctx.Response.Header.Set(fasthttp.HeaderContentType, http.DetectContentType(w.responseBody[:l]))
 				}
 			}
@@ -201,7 +204,9 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			}
 			if !haveContentType {
 				w.mu.Lock()
-				if len(w.responseBody) > 0 {
+				if f.encoded {
+					ctx.Response.Header.SetNoDefaultContentType(true)
+				} else if len(w.responseBody) > 0 {
 					l := min(len(w.responseBody), 512)
 					ctx.Response.Header.Set(fasthttp.HeaderContentType, http.DetectContentType(w.responseBody[:l]))
 				}
@@ -569,8 +574,9 @@ const bufferBeforeChunkingSize = 2048
 // Transfer-Encoding, which carry no trailers; chunked is any other
 // Transfer-Encoding, which overrides a Content-Length, or a Content-Length
 // that is no length, which net/http chunks around; prefix is a TrailerPrefix
-// field; trailer is the announcement and values what the announced names
-// held then.
+// field; encoded is a Content-Encoding, which keeps the body from being
+// sniffed for a Content-Type; trailer is the announcement and values what
+// the announced names held then.
 //
 // noType is a Content-Type set to nil or to an empty value, which is how
 // net/http handlers turn the header off (see http.ResponseWriter.Header and
@@ -578,10 +584,10 @@ const bufferBeforeChunkingSize = 2048
 // explicitly empty value as one empty Content-Type field; fasthttp cannot
 // write an empty Content-Type, so the adaptor sends none for it too.
 type framing struct {
-	fixed, chunked, prefix bool
-	noType                 bool
-	trailer                []string
-	values                 map[string][]string
+	fixed, chunked, prefix, encoded bool
+	noType                          bool
+	trailer                         []string
+	values                          map[string][]string
 }
 
 func frameOf(h http.Header) framing {
@@ -590,6 +596,7 @@ func frameOf(h http.Header) framing {
 		fixed:   te == "identity",
 		chunked: te != "" && te != "identity",
 		prefix:  hasTrailerPrefix(h),
+		encoded: h.Get(fasthttp.HeaderContentEncoding) != "",
 		trailer: slices.Clone(h[fasthttp.HeaderTrailer]),
 	}
 	if vv, ok := h[fasthttp.HeaderContentType]; ok {
