@@ -1919,9 +1919,7 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		// the one set on the request to reflect the remaining time.
 		if timeout > 0 {
 			remaining := time.Until(deadline)
-			if origTimeout > 0 {
-				req.timeout = remaining
-			}
+			req.timeout = remaining
 			if remaining <= 0 {
 				if ctxErr := contextErr(req.ctx); ctxErr != nil {
 					err = ctxErr
@@ -1934,6 +1932,9 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 
 		retry, err = c.do(req, resp)
 		if ctxErr := contextErr(req.ctx); ctxErr != nil {
+			if resp != nil {
+				_ = resp.closeBodyStream(ctxErr)
+			}
 			err = ctxErr
 			break
 		}
@@ -2815,33 +2816,31 @@ func dialAddrContext(
 	_, isTLSAlready := conn.(interface{ Handshake() error })
 
 	if isTLS && !isTLSAlready {
-		var deadline time.Time
-		if writeTimeout > 0 {
-			deadline = start.Add(writeTimeout)
+		if writeTimeout == 0 {
+			return tls.Client(conn, tlsConfig), nil
 		}
+		deadline := start.Add(writeTimeout)
+		dialDeadlineWon := false
 		if dialTimeout > 0 {
 			timeoutDeadline := start.Add(dialTimeout)
-			if deadline.IsZero() || timeoutDeadline.Before(deadline) {
+			if !timeoutDeadline.After(deadline) {
 				deadline = timeoutDeadline
+				dialDeadlineWon = true
 			}
 		}
-		if !deadline.IsZero() && !time.Now().Before(deadline) {
+		if !time.Now().Before(deadline) {
 			_ = conn.Close()
 			if ctxErr := contextErr(ctx); ctxErr != nil {
 				return nil, ctxErr
 			}
-			if writeTimeout == 0 && dialTimeout > 0 {
+			if dialDeadlineWon {
 				return nil, ErrTimeout
 			}
 			return nil, ErrTLSHandshakeTimeout
 		}
-		if writeTimeout == 0 && dialTimeout <= 0 && (ctx == nil || ctx.Done() == nil) {
-			return tls.Client(conn, tlsConfig), nil
-		}
 		conn, err = tlsClientHandshake(ctx, conn, tlsConfig, deadline)
 		if err != nil {
-			if errors.Is(err, ErrTLSHandshakeTimeout) && dialTimeout > 0 &&
-				(writeTimeout == 0 || !start.Add(dialTimeout).After(deadline)) {
+			if errors.Is(err, ErrTLSHandshakeTimeout) && dialDeadlineWon {
 				return nil, ErrTimeout
 			}
 			return nil, err
@@ -4169,6 +4168,17 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 			return true, err
 		}
 		cc.writeDeadlineSet = !writeDeadline.IsZero()
+	}
+	if hc.IsTLS && !deadline.IsZero() {
+		if err = conn.SetReadDeadline(deadline); err != nil {
+			watcher.stop()
+			hc.CloseConn(cc)
+			if ctxErr := contextErr(req.ctx); ctxErr != nil {
+				return false, ctxErr
+			}
+			return true, err
+		}
+		cc.readDeadlineSet = true
 	}
 
 	resetConnection := false

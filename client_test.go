@@ -8491,6 +8491,62 @@ func TestClientDoContext_DialTimeoutReconciliation(t *testing.T) {
 	if elapsed >= 250*time.Millisecond {
 		t.Fatalf("expected dial to abort in ~40ms, took %v (err: %v)", elapsed, err)
 	}
+
+	// Both req.SetContext + Do and DoContext must pass the remaining context deadline
+	// to DialTimeout even when origTimeout is zero, and restore req.Timeout() afterward.
+	for _, tc := range []struct {
+		name string
+		call func(ctx context.Context, c *HostClient, req *Request, resp *Response) error
+	}{
+		{
+			name: "SetContext+Do",
+			call: func(ctx context.Context, c *HostClient, req *Request, resp *Response) error {
+				req.SetContext(ctx)
+				return c.Do(req, resp)
+			},
+		},
+		{
+			name: "DoContext",
+			call: func(ctx context.Context, c *HostClient, req *Request, resp *Response) error {
+				return c.DoContext(ctx, req, resp)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dialTimeoutObserved := make(chan time.Duration, 1)
+			hc := &HostClient{
+				Addr: "dummyhost:80",
+				DialTimeout: func(addr string, timeout time.Duration) (net.Conn, error) {
+					dialTimeoutObserved <- timeout
+					return nil, errors.New("dial aborted for test")
+				},
+			}
+
+			dCtx, dCancel := context.WithTimeout(context.Background(), time.Second)
+			defer dCancel()
+
+			r := AcquireRequest()
+			defer ReleaseRequest(r)
+			rsp := AcquireResponse()
+			defer ReleaseResponse(rsp)
+			r.SetRequestURI("http://dummyhost/test")
+
+			_ = tc.call(dCtx, hc, r, rsp)
+
+			select {
+			case got := <-dialTimeoutObserved:
+				if got <= 0 || got > time.Second {
+					t.Fatalf("%s: expected DialTimeout in (0, 1s], got %v", tc.name, got)
+				}
+			case <-time.After(time.Second):
+				t.Fatalf("%s: timed out waiting for DialTimeout callback", tc.name)
+			}
+
+			if r.timeout != 0 {
+				t.Fatalf("%s: expected req.timeout to be restored to 0, got %v", tc.name, r.timeout)
+			}
+		})
+	}
 }
 
 func TestClientDo_UsesConfiguredDialContext(t *testing.T) {
@@ -8773,6 +8829,24 @@ func TestClientDoContext_TLSHandshakeTimeoutBounded(t *testing.T) {
 	}
 	if elapsed >= 150*time.Millisecond {
 		t.Fatalf("expected TLS handshake to be bounded by request timeout, took %v", elapsed)
+	}
+
+	// Case 3: 15ms DoTimeout, 40ms legacy Dial, and 1s WriteTimeout -> ErrTimeout (request deadline expired first).
+	slowDialClient := &HostClient{
+		Addr:         "inmemory",
+		IsTLS:        true,
+		WriteTimeout: time.Second,
+		Dial: func(addr string) (net.Conn, error) {
+			time.Sleep(40 * time.Millisecond)
+			return ln.Dial()
+		},
+	}
+	req.Reset()
+	resp.Reset()
+	req.SetRequestURI("https://inmemory/test")
+	err = slowDialClient.DoTimeout(&req, &resp, 15*time.Millisecond)
+	if !errors.Is(err, ErrTimeout) {
+		t.Fatalf("expected ErrTimeout when DoTimeout expires before WriteTimeout, got %v", err)
 	}
 }
 
@@ -9190,6 +9264,7 @@ func TestHostClientQueuedReplacementConn_MaxConnWaitTimeout(t *testing.T) {
 
 type readSignalReader struct {
 	io.ReadCloser
+
 	signalOnce sync.Once
 	signaled   chan struct{}
 }
@@ -9579,4 +9654,149 @@ func TestHostClientDoContext_BlockedLegacyDialTimeoutWaitsForReturn(t *testing.T
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for DoContext to return after DialTimeout unblocked")
 	}
+}
+
+func TestHostClientDoTimeout_TLSClientHelloCloseRetries(t *testing.T) {
+	t.Parallel()
+
+	certData, keyData, err := GenerateTestCertificate("127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := tls.X509KeyPair(certData, keyData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverTLSConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+	}
+
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("cannot listen: %v", err)
+	}
+	defer ln.Close()
+
+	var connCount atomic.Int32
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		s := &Server{
+			Handler: func(ctx *RequestCtx) {
+				ctx.SetStatusCode(StatusOK)
+				ctx.SetBodyString("ok")
+			},
+		}
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			n := connCount.Add(1)
+			go func(conn net.Conn, attempt int32) {
+				if attempt == 1 {
+					// Read the TLS ClientHello and close immediately without completing handshake.
+					buf := make([]byte, 512)
+					_, _ = conn.Read(buf)
+					_ = conn.Close()
+					return
+				}
+				tlsConn := tls.Server(conn, serverTLSConfig)
+				_ = s.ServeConn(tlsConn)
+			}(c, n)
+		}
+	}()
+
+	client := &HostClient{
+		Addr:         ln.Addr().String(),
+		IsTLS:        true,
+		WriteTimeout: 0,
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+	}
+
+	var req Request
+	var resp Response
+	req.SetRequestURI("https://" + ln.Addr().String() + "/retry-tls")
+
+	if err := client.DoTimeout(&req, &resp, 2*time.Second); err != nil {
+		t.Fatalf("expected DoTimeout to retry and succeed on second TLS connection, got: %v", err)
+	}
+	if resp.StatusCode() != StatusOK || string(resp.Body()) != "ok" {
+		t.Fatalf("unexpected response: status=%d body=%q", resp.StatusCode(), string(resp.Body()))
+	}
+	if connCount.Load() != 2 {
+		t.Fatalf("expected 2 connection attempts, got %d", connCount.Load())
+	}
+
+	_ = ln.Close()
+	<-serverDone
+}
+
+type testRoundTripFunc func(hc *HostClient, req *Request, resp *Response) (bool, error)
+
+func (f testRoundTripFunc) RoundTrip(hc *HostClient, req *Request, resp *Response) (bool, error) {
+	return f(hc, req, resp)
+}
+
+func TestHostClientDoContext_CanceledAfterStreamRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	serverStopCh := make(chan struct{})
+	go func() {
+		defer close(serverStopCh)
+		s := &Server{
+			Handler: func(ctx *RequestCtx) {
+				ctx.SetStatusCode(StatusOK)
+				ctx.SetBodyString("stream-ok")
+			},
+		}
+		_ = s.Serve(ln)
+	}()
+	defer func() {
+		_ = ln.Close()
+		<-serverStopCh
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var cancelOnce sync.Once
+
+	client := &HostClient{
+		Addr:               "inmemory",
+		MaxConns:           1,
+		StreamResponseBody: true,
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		Transport: testRoundTripFunc(func(hc *HostClient, req *Request, resp *Response) (bool, error) {
+			retry, err := DefaultTransport.RoundTrip(hc, req, resp)
+			cancelOnce.Do(cancel)
+			return retry, err
+		}),
+	}
+
+	var req1 Request
+	var resp1 Response
+	req1.SetRequestURI("http://inmemory/stream1")
+
+	err := client.DoContext(ctx, &req1, &resp1)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if resp1.IsBodyStream() {
+		t.Fatal("expected resp1.IsBodyStream() to be false after cancellation")
+	}
+
+	var req2 Request
+	var resp2 Response
+	req2.SetRequestURI("http://inmemory/stream2")
+	if err := client.Do(&req2, &resp2); err != nil {
+		t.Fatalf("expected subsequent request to reuse MaxConns=1 slot, got %v", err)
+	}
+	if resp2.StatusCode() != StatusOK {
+		t.Fatalf("expected status 200, got %d", resp2.StatusCode())
+	}
+	_ = resp2.CloseBodyStream()
 }
