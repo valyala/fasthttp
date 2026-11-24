@@ -1370,7 +1370,9 @@ func doRequestFollowRedirects(
 			break
 		}
 		redirectURI := AcquireURI()
-		url, err = getRedirectURL(url, location, req.DisableRedirectPathNormalizing, redirectURI)
+		// The client may normalize the path when sending the request. Resolve
+		// the next hop against that path, rather than the preceding Location.
+		url, err = getRedirectURL(req.URI().String(), location, req.DisableRedirectPathNormalizing, redirectURI)
 		if err != nil {
 			// A location that can't be parsed leaves an empty uri behind, and
 			// following that would send the next request without a host.

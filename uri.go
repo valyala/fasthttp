@@ -1021,6 +1021,9 @@ func (u *URI) updateBytes(newURI, buf []byte) ([]byte, error) {
 		path := u.Path()
 		if u.DisablePathNormalizing {
 			path = u.PathOriginal()
+			if len(path) == 0 {
+				path = strSlash
+			}
 		}
 		n = bytes.LastIndexByte(path, '/')
 		if n < 0 {

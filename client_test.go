@@ -4643,6 +4643,102 @@ func TestClientFollowRedirects(t *testing.T) {
 	ReleaseResponse(resp)
 }
 
+func TestClientRedirectChainUsesSentPath(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name            string
+		location        string
+		normalized      string
+		normalizedFinal string
+		originalFinal   string
+	}{
+		{
+			name:            "escaped slash",
+			location:        "/folder%2Fstart",
+			normalized:      "/folder/start",
+			normalizedFinal: "/folder/next",
+			originalFinal:   "/next",
+		},
+		{
+			name:            "escaped unreserved character",
+			location:        "/photo%2Dfolder/start",
+			normalized:      "/photo-folder/start",
+			normalizedFinal: "/photo-folder/next",
+			originalFinal:   "/photo%2Dfolder/next",
+		},
+	} {
+		for _, hostClient := range []bool{false, true} {
+			for _, disablePathNormalizing := range []bool{false, true} {
+				for _, disableRedirectPathNormalizing := range []bool{false, true} {
+					name := fmt.Sprintf("%s/host_client=%t/path=%t/redirect=%t", tt.name, hostClient,
+						disablePathNormalizing, disableRedirectPathNormalizing)
+					t.Run(name, func(t *testing.T) {
+						t.Parallel()
+
+						targets := make(chan string, 4)
+						server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+							targets <- r.RequestURI
+							switch r.RequestURI {
+							case "/begin":
+								w.Header().Set("Location", tt.location)
+								w.WriteHeader(http.StatusFound)
+							case tt.location, tt.normalized:
+								w.Header().Set("Location", "next")
+								w.WriteHeader(http.StatusFound)
+							default:
+								w.WriteHeader(http.StatusOK)
+							}
+						}))
+						defer server.Close()
+
+						var doRedirects func(*Request, *Response, int) error
+						if hostClient {
+							c := &HostClient{
+								Addr:                   strings.TrimPrefix(server.URL, "http://"),
+								DisablePathNormalizing: disablePathNormalizing,
+							}
+							defer c.CloseIdleConnections()
+							doRedirects = c.DoRedirects
+						} else {
+							c := &Client{DisablePathNormalizing: disablePathNormalizing}
+							defer c.CloseIdleConnections()
+							doRedirects = c.DoRedirects
+						}
+
+						var req Request
+						var resp Response
+						req.SetRequestURI(server.URL + "/begin")
+						req.SetTimeout(testTimeout(time.Second))
+						req.DisableRedirectPathNormalizing = disableRedirectPathNormalizing
+						if err := doRedirects(&req, &resp, 3); err != nil {
+							t.Fatal(err)
+						}
+						if resp.StatusCode() != StatusOK {
+							t.Fatalf("unexpected status code: %d", resp.StatusCode())
+						}
+
+						want := []string{"/begin", tt.normalized, tt.normalizedFinal}
+						if disablePathNormalizing && disableRedirectPathNormalizing {
+							want[1], want[2] = tt.location, tt.originalFinal
+						}
+						for i, target := range want {
+							select {
+							case got := <-targets:
+								if got != target {
+									t.Errorf("request %d target = %q, want %q", i, got, target)
+								}
+							default:
+								t.Fatalf("request %d was not received", i)
+							}
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
 func TestClientStreamingRedirectsReuseConnection(t *testing.T) {
 	t.Parallel()
 
