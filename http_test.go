@@ -6677,18 +6677,26 @@ func TestResponseHTTP10UpgradeKeepAliveEOFDelimitedSkippedBody(t *testing.T) {
 	// pooling it. A HEAD response carries no body, so it may still be reused.
 	run := func(method string, wantIdle int) {
 		clientConn, serverConn := net.Pipe()
-		keepOpen := make(chan struct{})
 		go func() {
 			defer serverConn.Close()
 			buf := make([]byte, 4096)
 			_, _ = serverConn.Read(buf) // request line and headers
+			body := ""
+			if method == MethodGet {
+				body = "body" // a GET with SkipBody leaves the body unread
+			}
 			_, _ = serverConn.Write([]byte("HTTP/1.0 200 OK\r\n" +
 				"Connection: upgrade\r\n" +
 				"Connection: keep-alive\r\n" +
-				"\r\n" +
-				"body"))
+				"\r\n" + body))
 			if method == MethodHead {
-				<-keepOpen // leave the connection usable so it can be pooled
+				// A HEAD response carries no body, so prove the pooled
+				// connection is usable by serving a second request on it.
+				if _, err := serverConn.Read(buf); err != nil {
+					t.Errorf("HEAD: pooled connection was not reused: %v", err)
+					return
+				}
+				_, _ = serverConn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"))
 			}
 		}()
 
@@ -6708,7 +6716,16 @@ func TestResponseHTTP10UpgradeKeepAliveEOFDelimitedSkippedBody(t *testing.T) {
 		if n := hc.IdleConnsCount(); n != wantIdle {
 			t.Fatalf("%s: %d idle connections, want %d", method, n, wantIdle)
 		}
-		close(keepOpen)
+		if method == MethodHead {
+			var req2 Request
+			req2.SetRequestURI("http://example.com/")
+			var resp2 Response
+			if err := hc.Do(&req2, &resp2); err != nil {
+				t.Fatalf("HEAD: second request on the pooled connection failed: %v", err)
+			}
+		}
+		hc.CloseIdleConnections()
+		clientConn.Close()
 	}
 
 	run(MethodGet, 0)

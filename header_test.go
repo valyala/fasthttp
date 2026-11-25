@@ -752,6 +752,16 @@ func TestRequestDelConnectionRecomputesCloseFlag(t *testing.T) {
 			wantClose: false,
 			wantIdle:  1,
 		},
+		{
+			// Special processing consumes the canonical close into the flag.
+			// Deleting only the lowercase keep-alive must not clear it.
+			name:               "canonical close survives a lowercase keep-alive delete",
+			disableNormalizing: true,
+			wire:               "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\nconnection: keep-alive\r\n\r\n",
+			delKey:             "connection",
+			wantClose:          true,
+			wantIdle:           0,
+		},
 	}
 
 	for _, tc := range tests {
@@ -828,6 +838,48 @@ func TestRequestHeaderDisableSpecialHeaderSetKeepsOtherCase(t *testing.T) {
 	}
 	if !strings.Contains(wire, "connection: close") {
 		t.Fatalf("lowercase close field was removed from the wire: %q", wire)
+	}
+}
+
+func TestRequestHeaderDisableSpecialHeaderSetSameValueHTTP10(t *testing.T) {
+	t.Parallel()
+
+	// HTTP/1.0 closes by default with no keep-alive. Setting the same
+	// Connection value must not turn that close into a pooled connection.
+	var h RequestHeader
+	h.DisableSpecialHeader()
+	raw := "GET / HTTP/1.0\r\nHost: example.com\r\nConnection: upgrade\r\n\r\n"
+	if err := h.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		t.Fatalf("unexpected header read error: %v", err)
+	}
+	if !h.ConnectionClose() {
+		t.Fatal("expected ConnectionClose for an HTTP/1.0 request")
+	}
+
+	h.Set("Connection", "upgrade")
+	if !h.ConnectionClose() {
+		t.Fatal("ConnectionClose cleared after setting the same value")
+	}
+
+	clientConn, serverConn := net.Pipe()
+	go serveReusableResponse(serverConn)
+	hc := &HostClient{
+		Addr: "example.com:80",
+		Dial: func(string) (net.Conn, error) { return clientConn, nil },
+	}
+	var req Request
+	req.SetRequestURI("http://example.com/")
+	req.Header.DisableSpecialHeader()
+	if err := req.Header.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		t.Fatalf("unexpected request header read error: %v", err)
+	}
+	req.Header.Set("Connection", "upgrade")
+	var resp Response
+	if err := hc.Do(&req, &resp); err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	if n := hc.IdleConnsCount(); n != 0 {
+		t.Fatalf("idle connections = %d, want 0 (HTTP/1.0 must still close)", n)
 	}
 }
 

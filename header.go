@@ -1995,14 +1995,28 @@ func (h *RequestHeader) del(key []byte) {
 	// With DisableNormalizing the key can be lowercase, so the switch above
 	// does not see HeaderConnection. delAllArgs matches keys exactly, so
 	// deleting one spelling can leave a differently cased Connection field
-	// behind. With the default settings the flag was set when the field was
-	// parsed and no field was stored at all. Recompute from what remains in
-	// both cases: keep the flag when a close field survives, clear it when
-	// none does.
+	// behind. With the default settings the close was consumed into the flag
+	// and no field was stored at all.
 	if caseInsensitiveCompare(strConnection, key) {
+		wasClose := false
+		for i := range h.h {
+			if string(h.h[i].key) == string(key) && hasHeaderValue(h.h[i].value, strClose) {
+				wasClose = true
+				break
+			}
+		}
 		h.h = delAllArgs(h.h, b2s(key))
 		h.trailerH = delAllArgs(h.trailerH, b2s(key))
-		h.connectionClose = hasConnectionCloseValue(h.h) || hasConnectionCloseValue(h.trailerH)
+		if hasConnectionCloseValue(h.h) || hasConnectionCloseValue(h.trailerH) {
+			// A differently cased close field survived the delete.
+			h.connectionClose = true
+		} else if wasClose || bytes.Equal(key, strConnection) {
+			// Either the close field was the one deleted, or the canonical
+			// spelling owns the separately stored flag.
+			h.connectionClose = false
+		}
+		// Otherwise only a keep-alive field was deleted under a noncanonical
+		// spelling. The canonical close lives in the flag and stays.
 		return
 	}
 	h.h = delAllArgs(h.h, b2s(key))
@@ -2556,10 +2570,13 @@ func (h *RequestHeader) SetCanonical(key, value []byte) {
 	h.setNonSpecial(key, h.bufV)
 	if connection {
 		// setNonSpecial replaces only the field with this exact key. With
-		// normalization off a differently cased Connection field can still be
-		// on the wire, so recompute from the fields that remain instead of
-		// stripping close from every spelling with ResetConnectionClose.
-		h.connectionClose = hasConnectionCloseValue(h.h) || hasConnectionCloseValue(h.trailerH)
+		// normalization off a differently cased close field can still be on
+		// the wire. An HTTP/1.0 request with no keep-alive closes by default,
+		// even though that close is not stored as a field, so keep that too.
+		closeField := hasConnectionCloseValue(h.h) || hasConnectionCloseValue(h.trailerH)
+		noHTTP11Close := h.noHTTP11 && !hasConnectionKeepAliveValue(h.h) &&
+			!hasConnectionKeepAliveValue(h.trailerH)
+		h.connectionClose = closeField || noHTTP11Close
 	}
 }
 
