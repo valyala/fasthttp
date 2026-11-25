@@ -1370,9 +1370,9 @@ func doRequestFollowRedirects(
 			break
 		}
 		redirectURI := AcquireURI()
-		// The client may normalize the path when sending the request. Resolve
-		// the next hop against that path, rather than the preceding Location.
-		url, err = getRedirectURL(req.URI().String(), location, req.DisableRedirectPathNormalizing, redirectURI)
+		// RequestURI may have discarded the parsed authority in a transport.
+		// Keep the preceding URL's authority and use the path actually sent.
+		url, err = getRedirectURL(url, req.RequestURI(), location, req.DisableRedirectPathNormalizing, redirectURI)
 		if err != nil {
 			// A location that can't be parsed leaves an empty uri behind, and
 			// following that would send the next request without a host.
@@ -1458,8 +1458,11 @@ func hasAuthority(location []byte) bool {
 	return n >= 0 && isAuthorityDelimiter(location, n)
 }
 
-func getRedirectURL(baseURL string, location []byte, disablePathNormalizing bool, dst *URI) (string, error) {
+func getRedirectURL(baseURL string, requestURI, location []byte, disablePathNormalizing bool, dst *URI) (string, error) {
 	dst.Update(baseURL)
+	if err := dst.UpdateBytesErr(requestURI); err != nil {
+		return "", err
+	}
 	dst.DisablePathNormalizing = disablePathNormalizing
 	if err := dst.UpdateBytesErr(location); err != nil {
 		return "", err

@@ -4643,6 +4643,90 @@ func TestClientFollowRedirects(t *testing.T) {
 	ReleaseResponse(resp)
 }
 
+func TestClientRedirectAfterTransportReadsRequestURI(t *testing.T) {
+	t.Parallel()
+
+	for _, hostClient := range []bool{false, true} {
+		for _, disablePathNormalizing := range []bool{false, true} {
+			for _, disableRedirectPathNormalizing := range []bool{false, true} {
+				name := fmt.Sprintf("host_client=%t/path=%t/redirect=%t", hostClient,
+					disablePathNormalizing, disableRedirectPathNormalizing)
+				t.Run(name, func(t *testing.T) {
+					t.Parallel()
+					var hosts, targets []string
+					transport := &TransportMock{wrapperFunc: func(_ *HostClient, req *Request, resp *Response) (bool, error) {
+						hosts = append(hosts, string(req.URI().Host()))
+						targets = append(targets, string(req.RequestURI()))
+						resp.SetStatusCode(StatusOK)
+						if len(targets) == 1 {
+							resp.SetStatusCode(StatusFound)
+							resp.Header.Set(HeaderLocation, "next")
+						}
+						return false, nil
+					}}
+					var doRedirects func(*Request, *Response, int) error
+					if hostClient {
+						c := &HostClient{Addr: "example.com", DisablePathNormalizing: disablePathNormalizing, Transport: transport}
+						doRedirects = c.DoRedirects
+					} else {
+						c := &Client{DisablePathNormalizing: disablePathNormalizing, Transport: transport}
+						doRedirects = c.DoRedirects
+					}
+					var req Request
+					var resp Response
+					req.SetRequestURI("http://example.com/dir/start")
+					req.DisableRedirectPathNormalizing = disableRedirectPathNormalizing
+					if err := doRedirects(&req, &resp, 1); err != nil {
+						t.Fatal(err)
+					}
+					if !slices.Equal(hosts, []string{"example.com", "example.com"}) {
+						t.Errorf("hosts = %q", hosts)
+					}
+					if !slices.Equal(targets, []string{"/dir/start", "/dir/next"}) {
+						t.Errorf("request targets = %q", targets)
+					}
+				})
+			}
+		}
+	}
+}
+
+func BenchmarkHostClientRelativeRedirect(b *testing.B) {
+	for _, disablePathNormalizing := range []bool{false, true} {
+		b.Run(fmt.Sprintf("disable_path_normalizing=%t", disablePathNormalizing), func(b *testing.B) {
+			requests := 0
+			c := &HostClient{
+				Addr:                   "example.com",
+				DisablePathNormalizing: disablePathNormalizing,
+				Transport: &TransportMock{wrapperFunc: func(_ *HostClient, _ *Request, resp *Response) (bool, error) {
+					requests++
+					resp.SetStatusCode(StatusOK)
+					if requests%2 == 1 {
+						resp.SetStatusCode(StatusFound)
+						resp.Header.Set(HeaderLocation, "next")
+					}
+					return false, nil
+				}},
+			}
+			var req Request
+			var resp Response
+			run := func() {
+				req.SetRequestURI("http://example.com/photo%2Dfolder/ordinary/object/start")
+				req.DisableRedirectPathNormalizing = disablePathNormalizing
+				if err := c.DoRedirects(&req, &resp, 1); err != nil {
+					b.Fatal(err)
+				}
+			}
+			run()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				run()
+			}
+		})
+	}
+}
+
 func TestClientRedirectChainUsesSentPath(t *testing.T) {
 	t.Parallel()
 
@@ -7230,7 +7314,7 @@ func TestGetRedirectURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			redirectURI := AcquireURI()
-			got, err := getRedirectURL(tt.args.baseURL, tt.args.location, tt.args.disablePathNormalizing, redirectURI)
+			got, err := getRedirectURL(tt.args.baseURL, nil, tt.args.location, tt.args.disablePathNormalizing, redirectURI)
 			ReleaseURI(redirectURI)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)

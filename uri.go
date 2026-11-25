@@ -1026,10 +1026,11 @@ func (u *URI) updateBytes(newURI, buf []byte) ([]byte, error) {
 			}
 		}
 		n = bytes.LastIndexByte(path, '/')
-		if n < 0 {
-			panic(fmt.Sprintf("BUG: path must contain at least one slash: %q %q", u.Path(), newURI))
-		}
 		buf = u.appendSchemeHost(buf[:0])
+		// SetPath also accepts paths without a leading slash.
+		if path[0] != '/' {
+			buf = append(buf, '/')
+		}
 		if u.DisablePathNormalizing {
 			buf = append(buf, path[:n+1]...)
 		} else {
