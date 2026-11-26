@@ -1638,6 +1638,23 @@ func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
 	dst.serverDefaultLine = h.serverDefaultLine
 }
 
+// Swap swaps the contents of h and other, settings included, without
+// copying them.
+//
+// Values obtained from h before the call keep pointing to the buffers
+// that other owns after it, and vice versa.
+func (h *ResponseHeader) Swap(other *ResponseHeader) {
+	// Field by field: assigning the whole value would copy noCopy.
+	h.header, other.header = other.header, h.header
+	h.statusMessage, other.statusMessage = other.statusMessage, h.statusMessage
+	h.contentEncoding, other.contentEncoding = other.contentEncoding, h.contentEncoding
+	h.server, other.server = other.server, h.server
+	h.serverDefaultLine, other.serverDefaultLine = other.serverDefaultLine, h.serverDefaultLine
+	h.statusCode, other.statusCode = other.statusCode, h.statusCode
+	h.noDefaultDate, other.noDefaultDate = other.noDefaultDate, h.noDefaultDate
+	h.serverSet, other.serverSet = other.serverSet, h.serverSet
+}
+
 // CopyTo copies all the headers to dst.
 func (h *RequestHeader) CopyTo(dst *RequestHeader) {
 	dst.Reset()
@@ -1651,6 +1668,24 @@ func (h *RequestHeader) CopyTo(dst *RequestHeader) {
 	dst.userAgentSet = h.userAgentSet
 	dst.cookiesCollected = h.cookiesCollected
 	dst.rawHeaders = append(dst.rawHeaders, h.rawHeaders...)
+}
+
+// Swap swaps the contents of h and other, settings included, without
+// copying them.
+//
+// Values obtained from h before the call keep pointing to the buffers
+// that other owns after it, and vice versa.
+func (h *RequestHeader) Swap(other *RequestHeader) {
+	// Field by field: assigning the whole value would copy noCopy.
+	h.header, other.header = other.header, h.header
+	h.method, other.method = other.method, h.method
+	h.requestURI, other.requestURI = other.requestURI, h.requestURI
+	h.host, other.host = other.host, h.host
+	h.userAgent, other.userAgent = other.userAgent, h.userAgent
+	h.rawHeaders, other.rawHeaders = other.rawHeaders, h.rawHeaders
+	h.disableSpecialHeader, other.disableSpecialHeader = other.disableSpecialHeader, h.disableSpecialHeader
+	h.cookiesCollected, other.cookiesCollected = other.cookiesCollected, h.cookiesCollected
+	h.userAgentSet, other.userAgentSet = other.userAgentSet, h.userAgentSet
 }
 
 // All returns an iterator over key-value pairs in h.

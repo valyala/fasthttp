@@ -155,6 +155,48 @@ func BenchmarkResponseHeaderWrite(b *testing.B) {
 	})
 }
 
+// A browser navigation: 17 header lines with a cookie.
+const benchBrowserRequestHeader = "GET /products/42?ref=home HTTP/1.1\r\n" +
+	"Host: shop.example.com\r\n" +
+	"User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36\r\n" +
+	"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8\r\n" +
+	"Accept-Language: en-US,en;q=0.9,de;q=0.8\r\n" +
+	"Accept-Encoding: gzip, deflate, br, zstd\r\n" +
+	"Referer: https://shop.example.com/\r\n" +
+	"Cookie: session=4f2a9c1e8b7d6a5f; theme=dark; _ga=GA1.2.123456789.1700000000\r\n" +
+	"Connection: keep-alive\r\n" +
+	"Upgrade-Insecure-Requests: 1\r\n" +
+	"Sec-Fetch-Dest: document\r\n" +
+	"Sec-Fetch-Mode: navigate\r\n" +
+	"Sec-Fetch-Site: same-origin\r\n" +
+	"Sec-Fetch-User: ?1\r\n" +
+	"Sec-Ch-Ua: \"Chromium\";v=\"130\", \"Google Chrome\";v=\"130\", \"Not?A_Brand\";v=\"99\"\r\n" +
+	"Sec-Ch-Ua-Mobile: ?0\r\n" +
+	"Sec-Ch-Ua-Platform: \"macOS\"\r\n" +
+	"\r\n"
+
+func BenchmarkRequestHeaderCopyTo(b *testing.B) {
+	var h, dst RequestHeader
+	if err := h.Read(bufio.NewReader(strings.NewReader(benchBrowserRequestHeader))); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		h.CopyTo(&dst)
+	}
+}
+
+func BenchmarkRequestHeaderSwap(b *testing.B) {
+	var h, other RequestHeader
+	if err := h.Read(bufio.NewReader(strings.NewReader(benchBrowserRequestHeader))); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		h.Swap(&other)
+	}
+}
+
 // Result: 2.2 ns/op.
 func BenchmarkRequestHeaderPeekBytesSpecialHeader(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {

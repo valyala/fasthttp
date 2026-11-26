@@ -1966,6 +1966,124 @@ func TestRequestHeaderCopyTo(t *testing.T) {
 	}
 }
 
+func TestRequestHeaderSwap(t *testing.T) {
+	t.Parallel()
+
+	var a, b RequestHeader
+	a.DisableNormalizing()
+	if err := a.Read(bufio.NewReader(strings.NewReader("GET /a HTTP/1.1\r\nHost: a.example\r\nx-name: aaaa\r\nCookie: c=1\r\n\r\n"))); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Read(bufio.NewReader(strings.NewReader("POST /b HTTP/1.1\r\nHost: b.example\r\nX-Name: bbbb\r\nTrailer: X-Trail\r\nContent-Length: 3\r\n\r\n"))); err != nil {
+		t.Fatal(err)
+	}
+	b.DisableSpecialHeader()
+	b.SetNoDefaultContentType(true)
+	cookie, host, name := a.Cookie("c"), a.Host(), a.Peek("x-name")
+	wantA, wantB := a.String(), b.String()
+
+	a.Swap(&b)
+	if got := a.String(); got != wantB {
+		t.Fatalf("unexpected header %q. Expected %q", got, wantB)
+	}
+	if got := b.String(); got != wantA {
+		t.Fatalf("unexpected header %q. Expected %q", got, wantA)
+	}
+	if a.disableNormalizing || !a.disableSpecialHeader || !a.noDefaultContentType || a.cookiesCollected {
+		t.Fatalf("settings did not move: %+v", &a)
+	}
+	if !b.disableNormalizing || b.disableSpecialHeader || b.noDefaultContentType || !b.cookiesCollected {
+		t.Fatalf("settings did not move: %+v", &b)
+	}
+	if got := string(b.Cookie("c")); got != "1" {
+		t.Fatalf("unexpected cookie %q. Expected %q", got, "1")
+	}
+	if got := a.PeekTrailerKeys(); len(got) != 1 || string(got[0]) != "X-Trail" {
+		t.Fatalf("unexpected trailer keys %q", got)
+	}
+
+	// The header swapped in writes to its own buffers.
+	a.SetHost("z.example")
+	a.Set("x-name", "zzzz")
+	a.SetCookie("c", "9")
+	if string(host) != "a.example" || string(name) != "aaaa" || string(cookie) != "1" {
+		t.Fatalf("values read before the swap changed: %q %q %q", host, name, cookie)
+	}
+
+	b.Swap(&b)
+	if got := b.String(); got != wantA {
+		t.Fatalf("unexpected header after swapping with itself %q. Expected %q", got, wantA)
+	}
+}
+
+func TestResponseHeaderSwap(t *testing.T) {
+	t.Parallel()
+
+	var a, b ResponseHeader
+	a.SetStatusCode(StatusNotFound)
+	a.SetServer("a")
+	a.Set("X-Name", "aaaa")
+	a.noDefaultDate = true
+	b.SetContentType("text/plain")
+	b.Set("X-Name", "bbbb")
+	name := a.Peek("X-Name")
+
+	a.Swap(&b)
+	if a.StatusCode() != StatusOK || string(a.Peek("X-Name")) != "bbbb" || string(a.ContentType()) != "text/plain" || a.noDefaultDate {
+		t.Fatalf("unexpected header %q", a.String())
+	}
+	if b.StatusCode() != StatusNotFound || string(b.Peek("X-Name")) != "aaaa" || string(b.Server()) != "a" || !b.noDefaultDate {
+		t.Fatalf("unexpected header %q", b.String())
+	}
+
+	a.Set("X-Name", "zzzz")
+	if string(name) != "aaaa" {
+		t.Fatalf("value read before the swap changed: %q", name)
+	}
+
+	b.Swap(&b)
+	if b.StatusCode() != StatusNotFound || string(b.Peek("X-Name")) != "aaaa" {
+		t.Fatalf("unexpected header after swapping with itself %q", b.String())
+	}
+}
+
+func TestHeaderSwapAllFields(t *testing.T) {
+	t.Parallel()
+
+	testHeaderSwapAllFields(t, (*RequestHeader).Swap, func() *RequestHeader {
+		return &RequestHeader{
+			header: header{contentLength: 1}, method: []byte("a"), requestURI: []byte("b"), host: []byte("c"),
+			userAgent: []byte("d"), rawHeaders: []byte("e"), disableSpecialHeader: true, cookiesCollected: true,
+			userAgentSet: true,
+		}
+	})
+	testHeaderSwapAllFields(t, (*ResponseHeader).Swap, func() *ResponseHeader {
+		return &ResponseHeader{
+			header: header{contentLength: 1}, statusMessage: []byte("a"), contentEncoding: []byte("b"), server: []byte("c"),
+			serverDefaultLine: []byte("d"), statusCode: 1, noDefaultDate: true, serverSet: true,
+		}
+	})
+}
+
+// testHeaderSwapAllFields fails when filled leaves a field unset, or when
+// swap leaves one behind.
+func testHeaderSwapAllFields[T any](t *testing.T, swap func(a, b *T), filled func() *T) {
+	t.Helper()
+
+	a, want := filled(), filled()
+	v := reflect.ValueOf(a).Elem()
+	for i := range v.NumField() {
+		if name := v.Type().Field(i).Name; name != "noCopy" && v.Field(i).IsZero() {
+			t.Fatalf("set %T.%s here and make Swap exchange it", a, name)
+		}
+	}
+	b := new(T)
+	swap(a, b)
+	if !reflect.DeepEqual(b, want) || !reflect.DeepEqual(a, new(T)) {
+		t.Fatalf("%T.Swap left fields behind:\n%+v\n%+v", a, a, b)
+	}
+}
+
 func TestResponseContentTypeNoDefaultNotEmpty(t *testing.T) {
 	t.Parallel()
 
