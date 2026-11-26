@@ -1372,7 +1372,11 @@ func doRequestFollowRedirects(
 		redirectURI := AcquireURI()
 		// RequestURI may have discarded the parsed authority in a transport.
 		// Keep the preceding URL's authority and use the path actually sent.
-		url, err = getRedirectURL(url, req.RequestURI(), location, req.DisableRedirectPathNormalizing, redirectURI)
+		requestURI := req.Header.RequestURI()
+		if req.parsedURI {
+			requestURI = req.requestURIFromURI()
+		}
+		url, err = getRedirectURL(url, requestURI, location, req.DisableRedirectPathNormalizing, redirectURI)
 		if err != nil {
 			// A location that can't be parsed leaves an empty uri behind, and
 			// following that would send the next request without a host.
@@ -1460,8 +1464,13 @@ func hasAuthority(location []byte) bool {
 
 func getRedirectURL(baseURL string, requestURI, location []byte, disablePathNormalizing bool, dst *URI) (string, error) {
 	dst.Update(baseURL)
-	if err := dst.UpdateBytesErr(requestURI); err != nil {
-		return "", err
+	// A request target is a path and query, not a URI reference: a leading
+	// double slash must not replace the authority, nor clear the fragment.
+	if len(requestURI) > 0 {
+		path, query, hasQuery := bytes.Cut(requestURI, []byte("?"))
+		dst.SetPathBytes(path)
+		dst.SetQueryStringBytes(query)
+		dst.forceQuery = hasQuery && len(query) == 0
 	}
 	dst.DisablePathNormalizing = disablePathNormalizing
 	if err := dst.UpdateBytesErr(location); err != nil {
