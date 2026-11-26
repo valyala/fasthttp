@@ -2567,16 +2567,6 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	for {
 		connRequestNum++
 
-		// A response always carries a status code, and middleware wrapping the
-		// handler expects to read the one the client receives. Set the default
-		// here, before ErrorHandler or ExpectHandler can see the context, instead
-		// of just before the handler: those callbacks run earlier and a fresh
-		// context would read 0 while a reused one could still read an earlier
-		// status code. Response.Reset keeps the default for server responses, so
-		// a handler or callback that resets the response does not make
-		// middleware read 0 either.
-		ctx.Response.Header.setServerDefaultStatus()
-
 		if connRequestNum == 1 {
 			// Apply ReadTimeout to the first request byte.
 			if s.ReadTimeout > 0 {
@@ -3313,6 +3303,13 @@ func (s *Server) acquireCtx(c net.Conn) (ctx *RequestCtx) {
 		ctx.formValueFunc = s.FormValueFunc
 	}
 	ctx.c = c
+	// A response always carries a status code, and middleware wrapping the
+	// handler expects to read the one the client receives. Set the default here
+	// so every context handed to ErrorHandler, ExpectHandler, or Handler starts
+	// with StatusOK, including a fresh one acquired by acquireByteReader after
+	// GC clears ctxPool under ReduceMemoryUsage. Response.Reset keeps the
+	// default for server responses across keep-alive requests.
+	ctx.Response.Header.setServerDefaultStatus()
 
 	return ctx
 }

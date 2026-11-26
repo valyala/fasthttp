@@ -7178,6 +7178,32 @@ func TestClientDoServerResponseClearsStatusCodeOnError(t *testing.T) {
 		{"PipelineClient.Do TLS config error", func(req *Request, resp *Response) error {
 			return (&PipelineClient{IsTLS: true, Addr: "foo:bar:baz"}).Do(req, resp)
 		}},
+		{"PipelineClient.DoTimeout EOF", func(req *Request, resp *Response) error {
+			ln := fasthttputil.NewInmemoryListener()
+			defer ln.Close()
+			go func() {
+				conn, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				br := bufio.NewReader(conn)
+				for {
+					line, err := br.ReadString('\n')
+					if err != nil || line == "\r\n" {
+						break
+					}
+				}
+				_ = conn.Close()
+			}()
+
+			c := &PipelineClient{
+				Dial: func(string) (net.Conn, error) {
+					return ln.Dial()
+				},
+				Logger: &testLogger{},
+			}
+			return c.DoTimeout(req, resp, 5*time.Second)
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var req Request
@@ -7196,5 +7222,74 @@ func TestClientDoServerResponseClearsStatusCodeOnError(t *testing.T) {
 				t.Fatalf("unexpected status code after the failed request: %d. Expecting 0", statusCode)
 			}
 		})
+	}
+}
+
+func TestPipelineClientDoTimeoutBodyErrorPreservesStatusOnServerResponse(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	t.Cleanup(func() {
+		_ = ln.Close()
+	})
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		br := bufio.NewReader(conn)
+		for {
+			line, err := br.ReadString('\n')
+			if err != nil || line == "\r\n" {
+				break
+			}
+		}
+		_, _ = conn.Write([]byte("HTTP/1.1 206 Partial Content\r\nContent-Length: 10\r\n\r\n123"))
+		_ = conn.Close()
+	}()
+
+	c := &PipelineClient{
+		Dial: func(string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		Logger: &testLogger{},
+	}
+
+	var req Request
+	req.SetRequestURI("http://example.com/")
+
+	var ctx RequestCtx
+	ctx.Init(&req, nil, nil)
+
+	if err := c.DoTimeout(&ctx.Request, &ctx.Response, 5*time.Second); err == nil {
+		t.Fatal("expecting error on truncated body")
+	}
+	if statusCode := ctx.Response.StatusCode(); statusCode != StatusPartialContent {
+		t.Fatalf("unexpected status code after truncated body: %d. Expecting %d", statusCode, StatusPartialContent)
+	}
+}
+
+type cachedRoundTripper struct{}
+
+func (cachedRoundTripper) RoundTrip(_ *HostClient, _ *Request, resp *Response) (bool, error) {
+	resp.SetBodyString("cached")
+	return false, nil
+}
+
+func TestClientGetCustomRoundTripperDefaultsStatusCode(t *testing.T) {
+	t.Parallel()
+
+	c := &Client{
+		Transport: cachedRoundTripper{},
+	}
+	statusCode, body, err := c.Get(nil, "http://example.com/")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if statusCode != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
+	}
+	if string(body) != "cached" {
+		t.Fatalf("unexpected body: %q. Expecting %q", body, "cached")
 	}
 }

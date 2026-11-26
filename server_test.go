@@ -5531,6 +5531,50 @@ func TestRequestCtxInitDefaultsStatusCode(t *testing.T) {
 	}
 }
 
+type gcOnFirstReadConn struct {
+	*readWriter
+	gcDone bool
+}
+
+func (c *gcOnFirstReadConn) Read(b []byte) (int, error) {
+	if !c.gcDone {
+		c.gcDone = true
+		runtime.GC()
+		runtime.GC()
+	}
+	return c.readWriter.Read(b)
+}
+
+func TestServerReduceMemoryUsageDefaultsStatusCodeAfterGC(t *testing.T) {
+	t.Parallel()
+
+	var handlerStatusCode int
+	s := &Server{
+		ReduceMemoryUsage: true,
+		Handler: func(ctx *RequestCtx) {
+			ctx.SuccessString("text/plain", "ok")
+			handlerStatusCode = ctx.Response.StatusCode()
+		},
+	}
+
+	rw := &gcOnFirstReadConn{readWriter: &readWriter{}}
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var resp Response
+	if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if statusCode := resp.StatusCode(); statusCode != StatusOK {
+		t.Fatalf("unexpected response status code: %d. Expecting %d", statusCode, StatusOK)
+	}
+	if handlerStatusCode != StatusOK {
+		t.Fatalf("handler saw status code %d after ctx.SuccessString. Expecting %d", handlerStatusCode, StatusOK)
+	}
+}
+
 func TestTimeoutHandlerTimeoutReuse(t *testing.T) {
 	t.Parallel()
 

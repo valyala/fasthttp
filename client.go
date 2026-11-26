@@ -1864,7 +1864,11 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		}
 	}
 
-	return c.transport().RoundTrip(c, req, resp)
+	retry, err := c.transport().RoundTrip(c, req, resp)
+	if err == nil && resp.Header.StatusCode() == 0 {
+		resp.Header.SetStatusCode(StatusOK)
+	}
+	return retry, err
 }
 
 func (c *HostClient) transport() RoundTripper {
@@ -3009,6 +3013,7 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 	var err error
 	select {
 	case <-w.done:
+		err = w.err
 		if resp != nil {
 			if resp.KeepBodyBuffer && resp.body != nil {
 				w.respCopy.copyToSkipBody(resp)
@@ -3021,8 +3026,13 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 				swapResponseBody(resp, &w.respCopy)
 			}
 			resp.StreamBody = streamBody
+			// copyToSkipBody resets resp, which restores StatusOK for a server
+			// response. Preserve the worker's unset status on error (0 if no
+			// status line was read, or the parsed status if only the body failed).
+			if err != nil && w.respCopy.Header.StatusCode() == 0 {
+				resp.Header.resetStatus()
+			}
 		}
-		err = w.err
 		c.releasePipelineWork(w)
 	case <-w.t.C:
 		err = ErrTimeout
