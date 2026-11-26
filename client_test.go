@@ -9888,8 +9888,104 @@ func TestHostClientDoContext_TLSGetClientCertificateCancel(t *testing.T) {
 		t.Fatal("DoContext stayed blocked after canceling while GetClientCertificate was waiting")
 	}
 
+	for _, writeTimeout := range []time.Duration{0, time.Second} {
+		timeoutClient := &HostClient{
+			Addr:         ln.Addr().String(),
+			IsTLS:        true,
+			WriteTimeout: writeTimeout,
+			TLSConfig: &tls.Config{
+				InsecureSkipVerify: true,
+				GetClientCertificate: func(info *tls.CertificateRequestInfo) (*tls.Certificate, error) {
+					<-info.Context().Done()
+					return nil, info.Context().Err()
+				},
+			},
+		}
+
+		parentCtx, parentCancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
+		var timeoutReq Request
+		var timeoutResp Response
+		timeoutReq.SetRequestURI("https://" + ln.Addr().String() + "/client-cert-timeout")
+		timeoutReq.SetTimeout(50 * time.Millisecond)
+
+		err := timeoutClient.DoContext(parentCtx, &timeoutReq, &timeoutResp)
+		parentActive := parentCtx.Err() == nil
+		parentCancel()
+
+		if !errors.Is(err, ErrTimeout) {
+			t.Fatalf("WriteTimeout=%v: expected ErrTimeout, got %v", writeTimeout, err)
+		}
+		if !parentActive {
+			t.Fatalf("WriteTimeout=%v: expected parent context to remain active when request timed out", writeTimeout)
+		}
+	}
+
 	_ = ln.Close()
 	<-serverDone
+}
+
+func TestHostClientDoContext_MultiAddrDialDeadline(t *testing.T) {
+	t.Parallel()
+
+	type dialAttempt struct {
+		addr      string
+		remaining time.Duration
+		hasDL     bool
+	}
+
+	var attempts []dialAttempt
+	var mu sync.Mutex
+
+	client := &HostClient{
+		Addr:                      "addr1:80,addr2:80",
+		MaxIdemponentCallAttempts: 1,
+		DialContext: func(ctx context.Context, addr string) (net.Conn, error) {
+			dl, ok := ctx.Deadline()
+			var rem time.Duration
+			if ok {
+				rem = time.Until(dl)
+			}
+			mu.Lock()
+			attempts = append(attempts, dialAttempt{
+				addr:      addr,
+				remaining: rem,
+				hasDL:     ok,
+			})
+			idx := len(attempts)
+			mu.Unlock()
+
+			if idx == 1 {
+				time.Sleep(100 * time.Millisecond)
+				return nil, errors.New("first dial failed")
+			}
+			return nil, errors.New("second dial failed")
+		},
+	}
+
+	var req Request
+	var resp Response
+	req.SetRequestURI("http://example.com/multi-addr")
+	req.SetTimeout(180 * time.Millisecond)
+
+	err := client.DoContext(context.Background(), &req, &resp)
+	if err == nil {
+		t.Fatal("expected dial error, got nil")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(attempts) != 2 {
+		t.Fatalf("expected 2 dial attempts, got %d", len(attempts))
+	}
+	if attempts[0].addr != "addr1:80" || attempts[1].addr != "addr2:80" {
+		t.Fatalf("unexpected dialed addresses: %+v", attempts)
+	}
+	if !attempts[1].hasDL {
+		t.Fatal("expected second DialContext call to have a deadline")
+	}
+	if attempts[1].remaining <= 0 || attempts[1].remaining > 120*time.Millisecond {
+		t.Fatalf("expected second dial remaining deadline in (0, 120ms], got %v", attempts[1].remaining)
+	}
 }
 
 func TestHostClientDoContext_TLSClientHelloCloseRetries(t *testing.T) {

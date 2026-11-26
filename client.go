@@ -2677,6 +2677,9 @@ func (c *HostClient) dialHostHardContext(ctx context.Context, dialTimeout time.D
 	// attempt to dial all the available hosts before giving up.
 
 	c.addrsLock.Lock()
+	if c.addrs == nil {
+		c.addrs = strings.Split(c.Addr, ",")
+	}
 	n := len(c.addrs)
 	c.addrsLock.Unlock()
 
@@ -2690,9 +2693,23 @@ func (c *HostClient) dialHostHardContext(ctx context.Context, dialTimeout time.D
 		timeout = DefaultDialTimeout
 	}
 	deadline := time.Now().Add(timeout)
+	var dialDeadline time.Time
+	if dialTimeout > 0 {
+		dialDeadline = time.Now().Add(dialTimeout)
+	}
 	for n > 0 {
 		if ctxErr := contextErr(ctx); ctxErr != nil {
 			return nil, ctxErr
+		}
+		attemptDialTimeout := dialTimeout
+		if !dialDeadline.IsZero() {
+			attemptDialTimeout = time.Until(dialDeadline)
+			if attemptDialTimeout <= 0 {
+				if err == nil {
+					err = ErrTimeout
+				}
+				break
+			}
 		}
 		addr := c.nextAddr()
 		var tlsConfig *tls.Config
@@ -2704,7 +2721,7 @@ func (c *HostClient) dialHostHardContext(ctx context.Context, dialTimeout time.D
 			}
 		}
 		conn, err = dialAddrContext(
-			ctx, addr, c.Dial, c.DialTimeout, c.DialContext, c.DialDualStack, c.IsTLS, tlsConfig, dialTimeout, c.WriteTimeout,
+			ctx, addr, c.Dial, c.DialTimeout, c.DialContext, c.DialDualStack, c.IsTLS, tlsConfig, attemptDialTimeout, c.WriteTimeout,
 		)
 		if err == nil {
 			if ctxErr := contextErr(ctx); ctxErr != nil {
@@ -2749,7 +2766,7 @@ var ErrTLSHandshakeTimeout = errors.New("fasthttp: tls handshake timed out")
 
 //nolint:contextcheck
 func tlsClientHandshake(
-	ctx context.Context, rawConn net.Conn, tlsConfig *tls.Config, deadline time.Time,
+	ctx context.Context, rawConn net.Conn, tlsConfig *tls.Config, deadline, handshakeDeadline time.Time,
 ) (_ net.Conn, retErr error) {
 	defer func() {
 		if retErr != nil {
@@ -2766,6 +2783,13 @@ func tlsClientHandshake(
 	handshakeCtx := ctx
 	if handshakeCtx == nil {
 		handshakeCtx = context.Background()
+	}
+	if !handshakeDeadline.IsZero() {
+		if ctxDeadline, ok := handshakeCtx.Deadline(); !ok || handshakeDeadline.Before(ctxDeadline) {
+			var cancel context.CancelFunc
+			handshakeCtx, cancel = context.WithDeadline(handshakeCtx, handshakeDeadline)
+			defer cancel()
+		}
 	}
 	err := conn.HandshakeContext(handshakeCtx)
 	if ctxErr := contextErr(ctx); ctxErr != nil {
@@ -2846,7 +2870,11 @@ func dialAddrContext(
 			}
 			return nil, ErrTLSHandshakeTimeout
 		}
-		conn, err = tlsClientHandshake(ctx, conn, tlsConfig, deadline)
+		var handshakeDeadline time.Time
+		if dialDeadlineWon {
+			handshakeDeadline = deadline
+		}
+		conn, err = tlsClientHandshake(ctx, conn, tlsConfig, deadline, handshakeDeadline)
 		if err != nil {
 			if errors.Is(err, ErrTLSHandshakeTimeout) && dialDeadlineWon {
 				return nil, ErrTimeout
@@ -4188,10 +4216,26 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		}
 		cc.readDeadlineSet = true
 	}
-	if hc.IsTLS && req.ctx != nil {
+	if hc.IsTLS && (req.ctx != nil || !deadline.IsZero()) {
 		if tlsConn, ok := conn.(interface{ HandshakeContext(context.Context) error }); ok {
-			if err = tlsConn.HandshakeContext(req.ctx); err != nil {
+			handshakeCtx := req.ctx
+			if handshakeCtx == nil {
+				handshakeCtx = context.Background()
+			}
+			var cancel context.CancelFunc
+			if !deadline.IsZero() {
+				if ctxDeadline, ok := handshakeCtx.Deadline(); !ok || deadline.Before(ctxDeadline) {
+					handshakeCtx, cancel = context.WithDeadline(handshakeCtx, deadline)
+				}
+			}
+			err = tlsConn.HandshakeContext(handshakeCtx)
+			if cancel != nil {
+				cancel()
+			}
+			if err != nil {
 				if x, ok := err.(interface{ Timeout() bool }); ok && x.Timeout() {
+					err = ErrTimeout
+				} else if errors.Is(err, context.DeadlineExceeded) {
 					err = ErrTimeout
 				}
 				watcher.stop()
