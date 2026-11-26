@@ -64,6 +64,10 @@ var (
 	strProxyAuthorization = []byte(HeaderProxyAuthorization)
 	strWWWAuthenticate    = []byte(HeaderWWWAuthenticate)
 	strVary               = []byte(HeaderVary)
+	strCacheControl       = []byte(HeaderCacheControl)
+	strContentLocation    = []byte(HeaderContentLocation)
+	strETag               = []byte(HeaderETag)
+	strExpires            = []byte(HeaderExpires)
 
 	strCookieExpires        = []byte("expires")
 	strCookieDomain         = []byte("domain")

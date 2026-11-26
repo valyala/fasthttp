@@ -2753,6 +2753,61 @@ func TestFSGenerateETagCompress(t *testing.T) {
 	}
 }
 
+func TestFSNotModifiedKeepsHandlerHeaders(t *testing.T) {
+	t.Parallel()
+
+	// File locking is flaky on Windows.
+	if runtime.GOOS == "windows" {
+		t.SkipNow()
+	}
+
+	dir := t.TempDir()
+	body := strings.Repeat("fasthttp not modified test body\n", 1000)
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte(body), 0o600); err != nil {
+		t.Fatalf("cannot create test file: %v", err)
+	}
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	fsHandler := (&FS{
+		Root:         dir,
+		Compress:     true,
+		GenerateETag: true,
+		CleanStop:    stop,
+	}).NewRequestHandler()
+	h := func(ctx *RequestCtx) {
+		ctx.Response.Header.Set(HeaderCacheControl, "no-cache")
+		ctx.Response.Header.Set(HeaderVary, "Origin")
+		ctx.Response.Header.Set(HeaderETag, `"handler"`)
+		fsHandler(ctx)
+	}
+	acceptGzip := func(req *Request) {
+		req.Header.Set(HeaderAcceptEncoding, "gzip")
+	}
+
+	ok := testFSETagRequest(t, h, acceptGzip)
+	notModified := testFSETagRequest(t, h, func(req *Request) {
+		acceptGzip(req)
+		req.Header.SetBytesV(HeaderIfNoneMatch, ok.Header.Peek(HeaderETag))
+	})
+	if notModified.StatusCode() != StatusNotModified {
+		t.Fatalf("unexpected status code: %d. Expecting %d", notModified.StatusCode(), StatusNotModified)
+	}
+	// The 304 carries the same lines as the 200, without duplicates.
+	for name, want := range map[string]string{
+		HeaderCacheControl: "no-cache",
+		HeaderVary:         "Origin,Accept-Encoding",
+		HeaderETag:         string(ok.Header.Peek(HeaderETag)),
+	} {
+		for _, resp := range []*Response{ok, notModified} {
+			if got := resp.Header.PeekAll(name); len(got) != 1 || string(got[0]) != want {
+				t.Fatalf("unexpected %s in %d response: %q. Expecting %q", name, resp.StatusCode(), got, want)
+			}
+		}
+	}
+}
+
 func testFSETagRequest(t *testing.T, h RequestHandler, prepare func(req *Request)) *Response {
 	t.Helper()
 

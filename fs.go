@@ -1634,8 +1634,8 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	}
 	if notModified {
 		ctx.NotModified()
-		// NotModified resets the response, so add back the Vary header
-		// the 200 response would include.
+		// The 200 response sets its Vary and ETag below, so add them
+		// here as well.
 		// See https://www.rfc-editor.org/rfc/rfc9110#section-15.4.5
 		if ff.compressed {
 			ctx.Response.Header.addVaryBytes(strAcceptEncoding)

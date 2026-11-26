@@ -641,6 +641,60 @@ func testRequestCtxRedirect(t *testing.T, origURL, redirectURL, expectedURL stri
 	}
 }
 
+func TestRequestCtxNotModified(t *testing.T) {
+	t.Parallel()
+
+	for _, disableNormalizing := range []bool{false, true} {
+		s := &Server{
+			Handler: func(ctx *RequestCtx) {
+				h := &ctx.Response.Header
+				h.Set("x-custom", "foo")
+				h.Set("cache-control", "max-age=60")
+				h.Set("content-location", "/foo.en")
+				h.Set("etag", `"abc"`)
+				h.Set("expires", "Thu, 01 Dec 2033 16:00:00 GMT")
+				h.Add("vary", "Origin")
+				h.Add("vary", "Accept-Encoding")
+				h.Set("content-type", "text/html")
+				h.Set("content-encoding", "gzip")
+				h.Set("set-cookie", "a=b")
+				ctx.SetBodyString("hello")
+				ctx.NotModified()
+			},
+			DisableHeaderNamesNormalizing: disableNormalizing,
+		}
+
+		rw := &readWriter{}
+		rw.r.WriteString("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")
+		if err := s.ServeConn(rw); err != nil {
+			t.Fatalf("Unexpected error from serveConn: %v", err)
+		}
+		resp := strings.ToLower(rw.w.String())
+
+		if !strings.HasPrefix(resp, "http/1.1 304 not modified\r\n") || !strings.HasSuffix(resp, "\r\n\r\n") {
+			t.Fatalf("unexpected response %q", resp)
+		}
+		for _, line := range []string{
+			"cache-control: max-age=60",
+			"content-location: /foo.en",
+			`etag: "abc"`,
+			"expires: thu, 01 dec 2033 16:00:00 gmt",
+			"vary: origin",
+			"vary: accept-encoding",
+			"date: ",
+		} {
+			if !strings.Contains(resp, "\r\n"+line) {
+				t.Fatalf("missing %q in response %q", line, resp)
+			}
+		}
+		for _, name := range []string{"x-custom", "content-type", "content-encoding", "content-length", "set-cookie"} {
+			if strings.Contains(resp, "\r\n"+name+":") {
+				t.Fatalf("unexpected %q in response %q", name, resp)
+			}
+		}
+	}
+}
+
 func TestServerResponseServerHeader(t *testing.T) {
 	t.Parallel()
 
