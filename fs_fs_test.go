@@ -4,12 +4,15 @@ import (
 	"bufio"
 	"bytes"
 	"embed"
+	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -1687,4 +1690,145 @@ func TestFSFSStaleCompressedFileNotRemovedFromDisk(t *testing.T) {
 	if _, err := os.Stat(cachedName); err != nil {
 		t.Fatalf("file %q in the working directory was removed: %v", cachedName, err)
 	}
+}
+
+func TestFSKeepHeadersOnError(t *testing.T) {
+	t.Parallel()
+
+	files := fstest.MapFS{
+		"a.txt":     {Data: []byte("abc"), ModTime: time.Unix(1e9, 0)},
+		"dir/b.txt": {Data: []byte("b")},
+	}
+	streamed := func() fs.FS { return &streamFS{FS: files} }
+	type row struct {
+		fsys         func() fs.FS
+		rewrite      PathRewriteFunc
+		name         string
+		method       string
+		uri          string
+		reqHeader    string
+		reqValue     string
+		root         string
+		body         string
+		contentRange string
+		status       int
+		generateETag bool
+		acceptRange  bool
+	}
+	tests := []row{
+		{name: "nil byte", uri: "/a%00b", status: StatusBadRequest, body: "Are you a hacker?"},
+		{
+			name: "parent segment", uri: "/x", rewrite: func(*RequestCtx) []byte { return []byte("/../a.txt") },
+			status: StatusInternalServerError, body: "Internal Server Error",
+		},
+		{name: "directory without index", uri: "/dir/", status: StatusForbidden, body: "Directory index is forbidden"},
+		{name: "not found", uri: "/missing", status: StatusNotFound, body: "Cannot open requested path"},
+		{
+			name: "precondition failed", method: MethodPost, uri: "/a.txt", reqHeader: HeaderIfNoneMatch, reqValue: "*",
+			generateETag: true, status: StatusPreconditionFailed,
+		},
+		{
+			name: "file reader", uri: "/a.txt", fsys: func() fs.FS { return &streamFS{FS: files, failReopen: true} },
+			status: StatusInternalServerError, body: "Internal Server Error",
+		},
+		{
+			name: "range not satisfiable", uri: "/a.txt", reqHeader: HeaderRange, reqValue: "bytes=10-20", acceptRange: true,
+			status: StatusRequestedRangeNotSatisfiable, body: "Range Not Satisfiable", contentRange: "bytes */3",
+		},
+		{
+			name: "range seek", uri: "/a.txt", reqHeader: HeaderRange, reqValue: "bytes=1-1", acceptRange: true, fsys: streamed,
+			status: StatusInternalServerError, body: "Internal Server Error",
+		},
+		{
+			name: "head close", method: MethodHead, uri: "/a.txt", fsys: streamed,
+			status: StatusInternalServerError, body: "Internal Server Error",
+		},
+	}
+	if runtime.GOOS == "windows" {
+		tests = append(tests, row{name: "alternate data stream", uri: "/a.txt:s", root: t.TempDir(), status: StatusForbidden, body: "Forbidden"})
+	}
+
+	for _, tc := range tests {
+		for _, keep := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/keep=%t", tc.name, keep), func(t *testing.T) {
+				t.Parallel()
+
+				fsys := fs.FS(files)
+				if tc.fsys != nil {
+					fsys = tc.fsys()
+				}
+				if tc.root != "" {
+					fsys = nil
+				}
+				h := (&FS{
+					FS: fsys, Root: tc.root, PathRewrite: tc.rewrite, GenerateETag: tc.generateETag,
+					AcceptByteRange: tc.acceptRange, KeepHeadersOnError: keep, SkipCache: true,
+				}).NewRequestHandler()
+
+				var ctx RequestCtx
+				ctx.Init(&Request{}, nil, TestLogger{t: t})
+				if tc.method != "" {
+					ctx.Request.Header.SetMethod(tc.method)
+				}
+				ctx.Request.SetRequestURI(tc.uri)
+				if tc.reqHeader != "" {
+					ctx.Request.Header.Set(tc.reqHeader, tc.reqValue)
+				}
+				resp := &ctx.Response.Header
+				resp.Set("X-Frame-Options", "DENY")
+				resp.Set(HeaderVary, "Origin")
+				resp.Set(HeaderCacheControl, "private")
+				resp.Set(HeaderSetCookie, "session=1")
+				resp.Set(HeaderContentType, "application/json")
+				resp.Set(HeaderContentEncoding, "gzip")
+				resp.Set(HeaderETag, `"caller"`)
+				resp.Set(HeaderLastModified, "Mon, 02 Jan 2006 15:04:05 GMT")
+				h(&ctx)
+
+				if status, body := ctx.Response.StatusCode(), string(ctx.Response.Body()); status != tc.status || body != tc.body {
+					t.Fatalf("got %d %q, want %d %q", status, body, tc.status, tc.body)
+				}
+				for k, v := range map[string]string{"X-Frame-Options": "DENY", HeaderVary: "Origin", HeaderCacheControl: "private"} {
+					if kept := string(resp.Peek(k)) == v; kept != keep {
+						t.Errorf("%s kept: %t, want %t", k, kept, keep)
+					}
+				}
+				if kept := len(resp.PeekCookie("session")) != 0; kept != keep {
+					t.Errorf("cookie kept: %t, want %t", kept, keep)
+				}
+				// The error body is plain text, whoever set these before.
+				if ct := string(resp.ContentType()); ct != "text/plain; charset=utf-8" {
+					t.Errorf("Content-Type %q", ct)
+				}
+				for _, k := range []string{HeaderContentEncoding, HeaderETag, HeaderLastModified} {
+					if v := resp.Peek(k); len(v) > 0 {
+						t.Errorf("%s %q describes the file, not the error", k, v)
+					}
+				}
+				if cr := string(resp.Peek(HeaderContentRange)); cr != tc.contentRange {
+					t.Errorf("Content-Range %q, want %q", cr, tc.contentRange)
+				}
+			})
+		}
+	}
+}
+
+// streamFS hands out files without Seek and ReadAt, so FS streams them and
+// can't seek or rewind them. With failReopen only the first Open succeeds.
+type streamFS struct {
+	fs.FS
+
+	opened     atomic.Bool
+	failReopen bool
+}
+
+func (f *streamFS) Open(name string) (fs.File, error) {
+	if f.failReopen && f.opened.Swap(true) {
+		return nil, errors.New("file is gone")
+	}
+	file, err := f.FS.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	return struct{ fs.File }{file}, nil
 }
