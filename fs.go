@@ -532,6 +532,17 @@ type FS struct {
 	// ETag generation is disabled by default.
 	GenerateETag bool
 
+	// KeepHeadersOnError keeps the response headers set before FS when it
+	// answers with an error status, such as 403 for a directory without an
+	// index or 416 for a range it can't serve, as a PathNotFound handler
+	// already gets them. Only the headers that would describe the file are
+	// removed: Content-Type, Content-Encoding, Content-Length, Content-Range,
+	// ETag and Last-Modified.
+	//
+	// By default error responses are reset like RequestCtx.Error does, which
+	// also drops headers such as Set-Cookie or Vary set before FS.
+	KeepHeadersOnError bool
+
 	// SkipCache if true, will cache no file handler.
 	//
 	// By default is false.
@@ -689,6 +700,7 @@ func (fs *FS) initRequestHandler() {
 		pathNotFound:           fs.PathNotFound,
 		acceptByteRange:        fs.AcceptByteRange,
 		generateETag:           fs.GenerateETag,
+		keepHeadersOnError:     fs.KeepHeadersOnError,
 		skipCache:              fs.SkipCache,
 		compressedFileSuffixes: compressedFileSuffixes,
 	}
@@ -749,6 +761,7 @@ type fsHandler struct {
 	compressZstd       bool
 	acceptByteRange    bool
 	generateETag       bool
+	keepHeadersOnError bool
 	skipCache          bool
 }
 
@@ -1497,14 +1510,14 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 
 	if n := bytes.IndexByte(path, 0); n >= 0 {
 		ctx.Logger().Printf("cannot serve path with nil byte at position %d: %q", n, path)
-		ctx.Error("Are you a hacker?", StatusBadRequest)
+		h.sendError(ctx, "Are you a hacker?", StatusBadRequest)
 		return
 	}
 	// Prevent request paths from reaching NTFS alternate data streams through
 	// the default osFS. Custom filesystems may define their own colon syntax.
 	if _, ok := h.filesystem.(*osFS); ok && hasWindowsReservedPathColon(path, h.root == "") {
 		ctx.Logger().Printf("cannot serve path with a Windows-reserved ':' character: %q", path)
-		ctx.Error("Forbidden", StatusForbidden)
+		h.sendError(ctx, "Forbidden", StatusForbidden)
 		return
 	}
 
@@ -1517,7 +1530,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	if h.pathRewrite != nil || filepath.Separator == '\\' {
 		if hasDotDotPathSegment(path) {
 			ctx.Logger().Printf("cannot serve path with '..' path segment due to security reasons: %q", path)
-			ctx.Error("Internal Server Error", StatusInternalServerError)
+			h.sendError(ctx, "Internal Server Error", StatusInternalServerError)
 			return
 		}
 	}
@@ -1591,13 +1604,13 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			ff, err = h.openIndexFile(ctx, filePath, mustCompress, fileEncoding)
 			if err != nil {
 				ctx.Logger().Printf("cannot open dir index %q: %v", filePath, err)
-				ctx.Error("Directory index is forbidden", StatusForbidden)
+				h.sendError(ctx, "Directory index is forbidden", StatusForbidden)
 				return
 			}
 		} else if err != nil {
 			ctx.Logger().Printf("cannot open file %q: %v", filePath, err)
 			if h.pathNotFound == nil {
-				ctx.Error("Cannot open requested path", StatusNotFound)
+				h.sendError(ctx, "Cannot open requested path", StatusNotFound)
 			} else {
 				ctx.SetStatusCode(StatusNotFound)
 				h.pathNotFound(ctx)
@@ -1621,7 +1634,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			// See https://www.rfc-editor.org/rfc/rfc9110#section-13.1.2
 			if !ctx.IsGet() && !ctx.IsHead() {
 				ff.decReadersCount()
-				ctx.Response.Reset()
+				h.resetResponse(ctx)
 				ctx.SetStatusCode(StatusPreconditionFailed)
 				return
 			}
@@ -1651,7 +1664,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	if err != nil {
 		ff.decReadersCount()
 		ctx.Logger().Printf("cannot obtain file reader for path=%q: %v", path, err)
-		ctx.Error("Internal Server Error", StatusInternalServerError)
+		h.sendError(ctx, "Internal Server Error", StatusInternalServerError)
 		return
 	}
 
@@ -1679,7 +1692,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			if err != nil {
 				_ = r.(io.Closer).Close() //nolint:forcetypeassert
 				ctx.Logger().Printf("cannot parse byte range %q for path=%q: %v", byteRange, path, err)
-				ctx.Error("Range Not Satisfiable", StatusRequestedRangeNotSatisfiable)
+				h.sendError(ctx, "Range Not Satisfiable", StatusRequestedRangeNotSatisfiable)
 				// Tell the client the current length, as RFC 9110 section 15.5.17 asks.
 				hdr.Set(HeaderContentRange, "bytes */"+strconv.Itoa(contentLength))
 				return
@@ -1688,7 +1701,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			if err = r.(byteRangeUpdater).UpdateByteRange(startPos, endPos); err != nil { //nolint:forcetypeassert
 				_ = r.(io.Closer).Close() //nolint:forcetypeassert
 				ctx.Logger().Printf("cannot seek byte range %q for path=%q: %v", byteRange, path, err)
-				ctx.Error("Internal Server Error", StatusInternalServerError)
+				h.sendError(ctx, "Internal Server Error", StatusInternalServerError)
 				return
 			}
 
@@ -1713,7 +1726,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		if rc, ok := r.(io.Closer); ok {
 			if err := rc.Close(); err != nil {
 				ctx.Logger().Printf("cannot close file reader: %v", err)
-				ctx.Error("Internal Server Error", StatusInternalServerError)
+				h.sendError(ctx, "Internal Server Error", StatusInternalServerError)
 				return
 			}
 		}
@@ -1723,6 +1736,31 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		ctx.SetContentType(ff.contentType)
 	}
 	ctx.SetStatusCode(statusCode)
+}
+
+// sendError is RequestCtx.Error, unless KeepHeadersOnError is set.
+func (h *fsHandler) sendError(ctx *RequestCtx, msg string, statusCode int) {
+	h.resetResponse(ctx)
+	ctx.SetStatusCode(statusCode)
+	ctx.SetContentTypeBytes(defaultContentType)
+	ctx.SetBodyString(msg)
+}
+
+// resetResponse resets the response for an error. With KeepHeadersOnError
+// only the body and the headers describing the file are removed.
+func (h *fsHandler) resetResponse(ctx *RequestCtx) {
+	if !h.keepHeadersOnError {
+		ctx.Response.Reset()
+		return
+	}
+	ctx.Response.ResetBody()
+	hdr := &ctx.Response.Header
+	for _, k := range [...]string{
+		HeaderContentType, HeaderContentEncoding, HeaderContentLength,
+		HeaderContentRange, HeaderETag, HeaderLastModified,
+	} {
+		hdr.Del(k)
+	}
 }
 
 // redirectToDir redirects the request for a directory to the same path with
