@@ -827,6 +827,12 @@ func (ctx *RequestCtx) HijackSetNoResponse(noResponse bool) {
 	ctx.hijackNoResponse = noResponse
 }
 
+// HijackNoResponse returns the value set by HijackSetNoResponse.
+// It only takes effect together with Hijack.
+func (ctx *RequestCtx) HijackNoResponse() bool {
+	return ctx.hijackNoResponse
+}
+
 // Hijacked returns true after Hijack is called.
 func (ctx *RequestCtx) Hijacked() bool {
 	return ctx.hijackHandler != nil
