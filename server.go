@@ -1726,9 +1726,33 @@ func (ctx *RequestCtx) IfModifiedSince(lastModified time.Time) bool {
 }
 
 // NotModified resets response and sets '304 Not Modified' response status code.
+//
+// Cache-Control, Content-Location, ETag, Expires and Vary are kept, since a 304
+// must carry those the 200 response would. Date is written by the server.
+// See https://www.rfc-editor.org/rfc/rfc9110#section-15.4.5
 func (ctx *RequestCtx) NotModified() {
+	h := &ctx.Response.Header
+	n := 0
+	for i := range h.h {
+		if isNotModifiedHeader(h.h[i].key) {
+			if i != n {
+				h.h[n], h.h[i] = h.h[i], h.h[n]
+			}
+			n++
+		}
+	}
 	ctx.Response.Reset()
+	// Reset only truncates h.h, so the fields moved to its front are still there.
+	h.h = h.h[:n]
 	ctx.SetStatusCode(StatusNotModified)
+}
+
+func isNotModifiedHeader(key []byte) bool {
+	return caseInsensitiveCompare(key, strCacheControl) ||
+		caseInsensitiveCompare(key, strContentLocation) ||
+		caseInsensitiveCompare(key, strETag) ||
+		caseInsensitiveCompare(key, strExpires) ||
+		caseInsensitiveCompare(key, strVary)
 }
 
 // NotFound resets response and sets '404 Not Found' response status code.

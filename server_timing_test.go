@@ -25,6 +25,22 @@ func BenchmarkRequestCtxRedirect(b *testing.B) {
 	})
 }
 
+func BenchmarkRequestCtxNotModified(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		var ctx RequestCtx
+		for pb.Next() {
+			ctx.Response.Reset()
+			ctx.Response.Header.Set(HeaderCacheControl, "max-age=60")
+			ctx.Response.Header.Set(HeaderETag, `"abc"`)
+			ctx.Response.Header.Set(HeaderVary, HeaderAcceptEncoding)
+			ctx.Response.Header.Set("X-Request-Id", "123")
+			ctx.SetContentType("text/html")
+			ctx.SetBodyString("hello")
+			ctx.NotModified()
+		}
+	})
+}
+
 func BenchmarkServerGet1ReqPerConn(b *testing.B) {
 	benchmarkServerGet(b, defaultClientsCount, 1)
 }
