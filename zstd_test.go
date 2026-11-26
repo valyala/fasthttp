@@ -549,3 +549,57 @@ func TestWriteZstdLevelMultiBlock(t *testing.T) {
 		})
 	}
 }
+
+func TestZstdWriteHighLoadFallback(t *testing.T) {
+	// Warm up stacklessWriteZstdOnce so stacklessWriteZstdFunc can be swapped
+	// deterministically without racing against sync.Once initialization.
+	_ = AppendZstdBytes(nil, []byte("warmup"))
+
+	dispatch := stacklessWriteZstdFunc
+	t.Cleanup(func() { stacklessWriteZstdFunc = dispatch })
+	stacklessWriteZstdFunc = func(any) bool { return false }
+
+	payload := bytes.Repeat([]byte("high-load-zstd-payload"), 32)
+	prefix := []byte("prefix:")
+
+	gotAppend := AppendZstdBytes(prefix, payload)
+	if !bytes.Equal(gotAppend[:len(prefix)], prefix) {
+		t.Fatalf("AppendZstdBytes altered prefix: got %q; want %q", gotAppend[:len(prefix)], prefix)
+	}
+	if len(gotAppend) == len(prefix) {
+		t.Fatalf("AppendZstdBytes silently dropped payload under high load")
+	}
+	decoded, err := AppendUnzstdBytes(nil, gotAppend[len(prefix):])
+	if err != nil {
+		t.Fatalf("AppendUnzstdBytes(AppendZstdBytes): %v", err)
+	}
+	if !bytes.Equal(decoded, payload) {
+		t.Fatalf("AppendZstdBytes round-trip mismatch: got %d bytes; want %d", len(decoded), len(payload))
+	}
+
+	var buf bytes.Buffer
+	n, err := WriteZstdLevel(&buf, payload, CompressZstdDefault)
+	if err != nil || n != len(payload) {
+		t.Fatalf("WriteZstdLevel(*bytes.Buffer) = (%d, %v); want (%d, nil)", n, err, len(payload))
+	}
+	if buf.Len() == 0 {
+		t.Fatalf("WriteZstdLevel(*bytes.Buffer) wrote 0 bytes under high load")
+	}
+	decoded, err = AppendUnzstdBytes(nil, buf.Bytes())
+	if err != nil || !bytes.Equal(decoded, payload) {
+		t.Fatalf("WriteZstdLevel(*bytes.Buffer) decode = (%d bytes, %v); want %d bytes", len(decoded), err, len(payload))
+	}
+
+	var bb bytebufferpool.ByteBuffer
+	n, err = WriteZstdLevel(&bb, payload, CompressZstdBestSpeed)
+	if err != nil || n != len(payload) {
+		t.Fatalf("WriteZstdLevel(*bytebufferpool.ByteBuffer) = (%d, %v); want (%d, nil)", n, err, len(payload))
+	}
+	if len(bb.B) == 0 {
+		t.Fatalf("WriteZstdLevel(*bytebufferpool.ByteBuffer) wrote 0 bytes under high load")
+	}
+	decoded, err = AppendUnzstdBytes(nil, bb.B)
+	if err != nil || !bytes.Equal(decoded, payload) {
+		t.Fatalf("WriteZstdLevel(*bytebufferpool.ByteBuffer) decode = (%d bytes, %v); want %d bytes", len(decoded), err, len(payload))
+	}
+}
