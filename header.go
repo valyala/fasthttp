@@ -1998,25 +1998,22 @@ func (h *RequestHeader) del(key []byte) {
 	// behind. With the default settings the close was consumed into the flag
 	// and no field was stored at all.
 	if caseInsensitiveCompare(strConnection, key) {
-		wasClose := false
-		for i := range h.h {
-			if string(h.h[i].key) == string(key) && hasHeaderValue(h.h[i].value, strClose) {
-				wasClose = true
-				break
-			}
-		}
 		h.h = delAllArgs(h.h, b2s(key))
 		h.trailerH = delAllArgs(h.trailerH, b2s(key))
-		if hasConnectionCloseValue(h.h) || hasConnectionCloseValue(h.trailerH) {
-			// A differently cased close field survived the delete.
+		closeField := hasConnectionCloseValue(h.h) || hasConnectionCloseValue(h.trailerH)
+		noHTTP11Close := h.noHTTP11 && !hasConnectionKeepAliveValue(h.h) &&
+			!hasConnectionKeepAliveValue(h.trailerH)
+		if closeField || noHTTP11Close {
+			// A surviving close field, or the HTTP/1.0 default with the last
+			// keep-alive gone.
 			h.connectionClose = true
-		} else if wasClose || bytes.Equal(key, strConnection) {
-			// Either the close field was the one deleted, or the canonical
-			// spelling owns the separately stored flag.
+		} else if h.disableSpecialHeader || bytes.Equal(key, strConnection) {
+			// With special processing off, closes live only in fields, so an
+			// empty field list means no close. With it on, only deleting the
+			// canonical spelling clears the separately stored flag; deleting a
+			// lowercase field leaves that flag alone.
 			h.connectionClose = false
 		}
-		// Otherwise only a keep-alive field was deleted under a noncanonical
-		// spelling. The canonical close lives in the flag and stays.
 		return
 	}
 	h.h = delAllArgs(h.h, b2s(key))

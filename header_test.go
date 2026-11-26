@@ -724,6 +724,7 @@ func TestRequestDelConnectionRecomputesCloseFlag(t *testing.T) {
 		disableNormalizing bool
 		wire               string
 		delKey             string
+		initialClose       bool
 		wantClose          bool
 		wantIdle           int
 	}{
@@ -733,6 +734,7 @@ func TestRequestDelConnectionRecomputesCloseFlag(t *testing.T) {
 			disableNormalizing: true,
 			wire:               "GET / HTTP/1.1\r\nHost: example.com\r\nconnection: close\r\n\r\n",
 			delKey:             "connection",
+			initialClose:       true,
 			wantClose:          false,
 			wantIdle:           1,
 		},
@@ -742,15 +744,17 @@ func TestRequestDelConnectionRecomputesCloseFlag(t *testing.T) {
 			disableNormalizing: true,
 			wire:               "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\nconnection: keep-alive\r\n\r\n",
 			delKey:             "connection",
+			initialClose:       true,
 			wantClose:          true,
 			wantIdle:           0,
 		},
 		{
-			name:      "default settings store the flag separately",
-			wire:      "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n",
-			delKey:    "Connection",
-			wantClose: false,
-			wantIdle:  1,
+			name:         "default settings store the flag separately",
+			wire:         "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n",
+			delKey:       "Connection",
+			initialClose: true,
+			wantClose:    false,
+			wantIdle:     1,
 		},
 		{
 			// Special processing consumes the canonical close into the flag.
@@ -758,6 +762,29 @@ func TestRequestDelConnectionRecomputesCloseFlag(t *testing.T) {
 			name:               "canonical close survives a lowercase keep-alive delete",
 			disableNormalizing: true,
 			wire:               "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\nconnection: keep-alive\r\n\r\n",
+			delKey:             "connection",
+			initialClose:       true,
+			wantClose:          true,
+			wantIdle:           0,
+		},
+		{
+			// The lowercase field also lists close, but the canonical close
+			// was consumed into the flag and must survive the delete.
+			name:               "canonical close survives a lowercase close delete",
+			disableNormalizing: true,
+			wire:               "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\nconnection: upgrade, close\r\n\r\n",
+			delKey:             "connection",
+			initialClose:       true,
+			wantClose:          true,
+			wantIdle:           0,
+		},
+		{
+			// HTTP/1.0 closes by default. Removing the last keep-alive must
+			// restore that default rather than pool the connection.
+			name:               "deleting the last keep-alive restores HTTP/1.0 close",
+			disableNormalizing: true,
+			initialClose:       false,
+			wire:               "GET / HTTP/1.0\r\nHost: example.com\r\nConnection: upgrade\r\nconnection: keep-alive\r\n\r\n",
 			delKey:             "connection",
 			wantClose:          true,
 			wantIdle:           0,
@@ -776,8 +803,8 @@ func TestRequestDelConnectionRecomputesCloseFlag(t *testing.T) {
 			if err := h.Read(bufio.NewReader(strings.NewReader(tc.wire))); err != nil {
 				t.Fatalf("unexpected header read error: %v", err)
 			}
-			if !h.ConnectionClose() {
-				t.Fatal("expected ConnectionClose after reading the close field")
+			if got := h.ConnectionClose(); got != tc.initialClose {
+				t.Fatalf("ConnectionClose before delete = %v, want %v", got, tc.initialClose)
 			}
 
 			h.Del(tc.delKey)
