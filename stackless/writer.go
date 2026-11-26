@@ -86,8 +86,8 @@ func (w *writer) Close() error {
 
 func (w *writer) Reset(dstW io.Writer) {
 	w.xw.Reset()
-	w.do(opReset) //nolint:errcheck
 	w.dstW = dstW
+	w.do(opReset) //nolint:errcheck
 }
 
 func (w *writer) do(op op) error {
@@ -104,6 +104,7 @@ func (w *writer) do(op op) error {
 	}
 	err := w.err
 	if err != nil {
+		w.xw.Reset()
 		return err
 	}
 	if w.xw.bb != nil && len(w.xw.bb.B) > 0 {
