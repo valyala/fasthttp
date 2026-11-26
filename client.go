@@ -1889,17 +1889,18 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 	if timeout > 0 {
 		deadline = time.Now().Add(timeout)
 	}
+	var ctxDeadline time.Time
 	if req.ctx != nil {
-		if ctxDeadline, ok := req.ctx.Deadline(); ok {
-			if deadline.IsZero() || ctxDeadline.Before(deadline) {
-				deadline = ctxDeadline
-				timeout = time.Until(deadline)
-				if timeout <= 0 {
-					if ctxErr := contextErr(req.ctx); ctxErr != nil {
-						return ctxErr
-					}
-					return ErrTimeout
+		var ok bool
+		ctxDeadline, ok = req.ctx.Deadline()
+		if ok && (deadline.IsZero() || ctxDeadline.Before(deadline)) {
+			deadline = ctxDeadline
+			timeout = time.Until(deadline)
+			if timeout <= 0 {
+				if ctxErr := contextErr(req.ctx); ctxErr != nil {
+					return ctxErr
 				}
+				return ErrTimeout
 			}
 		}
 	}
@@ -1967,7 +1968,14 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 			break
 		}
 		if timeout > 0 && resetTimeout {
-			deadline = time.Now().Add(timeout)
+			if origTimeout > 0 {
+				deadline = time.Now().Add(origTimeout)
+				if !ctxDeadline.IsZero() && ctxDeadline.Before(deadline) {
+					deadline = ctxDeadline
+				}
+			} else if !ctxDeadline.IsZero() {
+				deadline = ctxDeadline
+			}
 		}
 	}
 	atomic.AddInt32(&c.pendingRequests, -1)
@@ -4179,6 +4187,21 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 			return true, err
 		}
 		cc.readDeadlineSet = true
+	}
+	if hc.IsTLS && req.ctx != nil {
+		if tlsConn, ok := conn.(interface{ HandshakeContext(context.Context) error }); ok {
+			if err = tlsConn.HandshakeContext(req.ctx); err != nil {
+				if x, ok := err.(interface{ Timeout() bool }); ok && x.Timeout() {
+					err = ErrTimeout
+				}
+				watcher.stop()
+				hc.CloseConn(cc)
+				if ctxErr := contextErr(req.ctx); ctxErr != nil {
+					return false, ctxErr
+				}
+				return true, err
+			}
+		}
 	}
 
 	resetConnection := false

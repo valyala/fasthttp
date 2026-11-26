@@ -9800,3 +9800,275 @@ func TestHostClientDoContext_CanceledAfterStreamRoundTrip(t *testing.T) {
 	}
 	_ = resp2.CloseBodyStream()
 }
+
+func TestHostClientDoContext_TLSGetClientCertificateCancel(t *testing.T) {
+	t.Parallel()
+
+	certData, keyData, err := GenerateTestCertificate("127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := tls.X509KeyPair(certData, keyData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverTLSConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		ClientAuth:   tls.RequestClientCert,
+	}
+
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("cannot listen: %v", err)
+	}
+	defer ln.Close()
+
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		s := &Server{
+			Handler: func(ctx *RequestCtx) {
+				ctx.SetStatusCode(StatusOK)
+			},
+		}
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(conn net.Conn) {
+				tlsConn := tls.Server(conn, serverTLSConfig)
+				_ = s.ServeConn(tlsConn)
+			}(c)
+		}
+	}()
+
+	inCallback := make(chan struct{})
+	var callbackOnce sync.Once
+	client := &HostClient{
+		Addr:         ln.Addr().String(),
+		IsTLS:        true,
+		WriteTimeout: 0,
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true,
+			GetClientCertificate: func(info *tls.CertificateRequestInfo) (*tls.Certificate, error) {
+				callbackOnce.Do(func() { close(inCallback) })
+				<-info.Context().Done()
+				return nil, info.Context().Err()
+			},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var req Request
+	var resp Response
+	req.SetRequestURI("https://" + ln.Addr().String() + "/client-cert")
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.DoContext(ctx, &req, &resp)
+	}()
+
+	select {
+	case <-inCallback:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for GetClientCertificate callback")
+	}
+
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("DoContext stayed blocked after canceling while GetClientCertificate was waiting")
+	}
+
+	_ = ln.Close()
+	<-serverDone
+}
+
+func TestHostClientDoContext_TLSClientHelloCloseRetries(t *testing.T) {
+	t.Parallel()
+
+	certData, keyData, err := GenerateTestCertificate("127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := tls.X509KeyPair(certData, keyData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverTLSConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+	}
+
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("cannot listen: %v", err)
+	}
+	defer ln.Close()
+
+	var connCount atomic.Int32
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		s := &Server{
+			Handler: func(ctx *RequestCtx) {
+				ctx.SetStatusCode(StatusOK)
+				ctx.SetBodyString("ok")
+			},
+		}
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			n := connCount.Add(1)
+			go func(conn net.Conn, attempt int32) {
+				if attempt == 1 {
+					buf := make([]byte, 512)
+					_, _ = conn.Read(buf)
+					_ = conn.Close()
+					return
+				}
+				tlsConn := tls.Server(conn, serverTLSConfig)
+				_ = s.ServeConn(tlsConn)
+			}(c, n)
+		}
+	}()
+
+	client := &HostClient{
+		Addr:         ln.Addr().String(),
+		IsTLS:        true,
+		WriteTimeout: 0,
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	var req Request
+	var resp Response
+	req.SetRequestURI("https://" + ln.Addr().String() + "/retry-tls-ctx")
+
+	if err := client.DoContext(ctx, &req, &resp); err != nil {
+		t.Fatalf("expected DoContext to retry and succeed on second TLS connection, got: %v", err)
+	}
+	if resp.StatusCode() != StatusOK || string(resp.Body()) != "ok" {
+		t.Fatalf("unexpected response: status=%d body=%q", resp.StatusCode(), string(resp.Body()))
+	}
+	if connCount.Load() != 2 {
+		t.Fatalf("expected 2 connection attempts, got %d", connCount.Load())
+	}
+
+	_ = ln.Close()
+	<-serverDone
+}
+
+func TestHostClientDoContext_RetryResetTimeoutCappedAtContextDeadline(t *testing.T) {
+	t.Parallel()
+
+	runCase := func(t *testing.T, useSetContext bool) {
+		t.Helper()
+
+		ln := fasthttputil.NewInmemoryListener()
+		var connCount atomic.Int32
+		serverStopCh := make(chan struct{})
+		go func() {
+			defer close(serverStopCh)
+			s := &Server{
+				Handler: func(ctx *RequestCtx) {
+					ctx.SetStatusCode(StatusOK)
+					ctx.SetBodyString("ok")
+				},
+			}
+			for {
+				c, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				n := connCount.Add(1)
+				go func(conn net.Conn, attempt int32) {
+					if attempt == 1 {
+						_ = conn.Close()
+						return
+					}
+					_ = s.ServeConn(conn)
+				}(c, n)
+			}
+		}()
+		defer func() {
+			_ = ln.Close()
+			<-serverStopCh
+		}()
+
+		var mu sync.Mutex
+		var dialTimeouts []time.Duration
+
+		client := &HostClient{
+			Addr: "inmemory",
+			DialTimeout: func(addr string, timeout time.Duration) (net.Conn, error) {
+				mu.Lock()
+				attempt := len(dialTimeouts) + 1
+				dialTimeouts = append(dialTimeouts, timeout)
+				mu.Unlock()
+				if attempt == 1 {
+					time.Sleep(70 * time.Millisecond)
+				}
+				return ln.Dial()
+			},
+			RetryIfErr: func(request *Request, attempts int, err error) (bool, bool) {
+				return true, true
+			},
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+		defer cancel()
+
+		var req Request
+		var resp Response
+		req.SetRequestURI("http://inmemory/retry-cap")
+
+		var err error
+		if useSetContext {
+			req.SetContext(ctx)
+			err = client.Do(&req, &resp)
+		} else {
+			err = client.DoContext(ctx, &req, &resp)
+		}
+		if err != nil {
+			t.Fatalf("expected retry to succeed within remaining deadline, got: %v", err)
+		}
+		if resp.StatusCode() != StatusOK {
+			t.Fatalf("expected status 200, got %d", resp.StatusCode())
+		}
+
+		mu.Lock()
+		gotTimeouts := append([]time.Duration(nil), dialTimeouts...)
+		mu.Unlock()
+
+		if len(gotTimeouts) != 2 {
+			t.Fatalf("expected 2 dial attempts, got %d (%v)", len(gotTimeouts), gotTimeouts)
+		}
+		if gotTimeouts[0] <= 80*time.Millisecond || gotTimeouts[0] > 125*time.Millisecond {
+			t.Fatalf("expected first dial timeout around 120ms, got %v", gotTimeouts[0])
+		}
+		if gotTimeouts[1] <= 0 || gotTimeouts[1] > 60*time.Millisecond {
+			t.Fatalf("expected second dial timeout to be capped at remaining deadline (<=60ms), got %v", gotTimeouts[1])
+		}
+	}
+
+	t.Run("DoContext", func(t *testing.T) {
+		runCase(t, false)
+	})
+	t.Run("SetContext_Do", func(t *testing.T) {
+		runCase(t, true)
+	})
+}
