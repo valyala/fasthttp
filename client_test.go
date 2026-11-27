@@ -9888,11 +9888,18 @@ func TestHostClientDoContext_TLSGetClientCertificateCancel(t *testing.T) {
 		t.Fatal("DoContext stayed blocked after canceling while GetClientCertificate was waiting")
 	}
 
-	for _, writeTimeout := range []time.Duration{0, time.Second} {
+	for _, tc := range []struct {
+		writeTimeout time.Duration
+		wantErr      error
+	}{
+		{writeTimeout: 0, wantErr: ErrTimeout},
+		{writeTimeout: time.Second, wantErr: ErrTimeout},
+		{writeTimeout: 25 * time.Millisecond, wantErr: ErrTLSHandshakeTimeout},
+	} {
 		timeoutClient := &HostClient{
 			Addr:         ln.Addr().String(),
 			IsTLS:        true,
-			WriteTimeout: writeTimeout,
+			WriteTimeout: tc.writeTimeout,
 			TLSConfig: &tls.Config{
 				InsecureSkipVerify: true,
 				GetClientCertificate: func(info *tls.CertificateRequestInfo) (*tls.Certificate, error) {
@@ -9912,11 +9919,11 @@ func TestHostClientDoContext_TLSGetClientCertificateCancel(t *testing.T) {
 		parentActive := parentCtx.Err() == nil
 		parentCancel()
 
-		if !errors.Is(err, ErrTimeout) {
-			t.Fatalf("WriteTimeout=%v: expected ErrTimeout, got %v", writeTimeout, err)
+		if !errors.Is(err, tc.wantErr) {
+			t.Fatalf("WriteTimeout=%v: expected %v, got %v", tc.writeTimeout, tc.wantErr, err)
 		}
 		if !parentActive {
-			t.Fatalf("WriteTimeout=%v: expected parent context to remain active when request timed out", writeTimeout)
+			t.Fatalf("WriteTimeout=%v: expected parent context to remain active when request timed out", tc.writeTimeout)
 		}
 	}
 
@@ -10105,18 +10112,26 @@ func TestHostClientDoContext_RetryResetTimeoutCappedAtContextDeadline(t *testing
 			<-serverStopCh
 		}()
 
+		const (
+			ctxTimeout = 500 * time.Millisecond
+			firstSleep = 150 * time.Millisecond
+		)
+
 		var mu sync.Mutex
 		var dialTimeouts []time.Duration
+		var dialDeadlines []time.Time
 
 		client := &HostClient{
 			Addr: "inmemory",
 			DialTimeout: func(addr string, timeout time.Duration) (net.Conn, error) {
+				now := time.Now()
 				mu.Lock()
 				attempt := len(dialTimeouts) + 1
 				dialTimeouts = append(dialTimeouts, timeout)
+				dialDeadlines = append(dialDeadlines, now.Add(timeout))
 				mu.Unlock()
 				if attempt == 1 {
-					time.Sleep(70 * time.Millisecond)
+					time.Sleep(firstSleep)
 				}
 				return ln.Dial()
 			},
@@ -10125,8 +10140,9 @@ func TestHostClientDoContext_RetryResetTimeoutCappedAtContextDeadline(t *testing
 			},
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), ctxTimeout)
 		defer cancel()
+		ctxDeadline, _ := ctx.Deadline()
 
 		var req Request
 		var resp Response
@@ -10148,16 +10164,20 @@ func TestHostClientDoContext_RetryResetTimeoutCappedAtContextDeadline(t *testing
 
 		mu.Lock()
 		gotTimeouts := append([]time.Duration(nil), dialTimeouts...)
+		gotDeadlines := append([]time.Time(nil), dialDeadlines...)
 		mu.Unlock()
 
 		if len(gotTimeouts) != 2 {
 			t.Fatalf("expected 2 dial attempts, got %d (%v)", len(gotTimeouts), gotTimeouts)
 		}
-		if gotTimeouts[0] <= 80*time.Millisecond || gotTimeouts[0] > 125*time.Millisecond {
-			t.Fatalf("expected first dial timeout around 120ms, got %v", gotTimeouts[0])
+		if gotTimeouts[0] <= ctxTimeout-firstSleep || gotTimeouts[0] > ctxTimeout+10*time.Millisecond {
+			t.Fatalf("expected first dial timeout around %v, got %v", ctxTimeout, gotTimeouts[0])
 		}
-		if gotTimeouts[1] <= 0 || gotTimeouts[1] > 60*time.Millisecond {
-			t.Fatalf("expected second dial timeout to be capped at remaining deadline (<=60ms), got %v", gotTimeouts[1])
+		if gotTimeouts[1] <= 0 || gotTimeouts[1] > ctxTimeout-firstSleep {
+			t.Fatalf("expected second dial timeout to be capped at remaining deadline (<=%v), got %v", ctxTimeout-firstSleep, gotTimeouts[1])
+		}
+		if gotDeadlines[1].After(ctxDeadline.Add(25 * time.Millisecond)) {
+			t.Fatalf("expected second dial deadline (%v) not to exceed original context deadline (%v)", gotDeadlines[1], ctxDeadline)
 		}
 	}
 

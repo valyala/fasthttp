@@ -340,7 +340,79 @@ func TestAllocationClient_FreshTLSDial_WriteTimeout(t *testing.T) {
 		}
 	})
 
+	// tlsClientHandshake wraps the handshake context with context.WithDeadline
+	// when WriteTimeout is set so callbacks such as GetClientCertificate observe
+	// the effective handshake deadline via info.Context().
+	if timeoutAllocs > baseAllocs+15 {
+		t.Fatalf("WriteTimeout added unexpected allocations on fresh TLS connection: got %f allocs/op with timeout, baseline was %f allocs/op", timeoutAllocs, baseAllocs)
+	}
+}
+
+func TestAllocationClient_WarmedTLSDial_DoTimeout(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestAllocationClient_FreshTLSDial_WriteTimeout$")
+	cmd.Env = append(os.Environ(), "FASTHTTP_ALLOC_TLS_SERVER_HELPER=1")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = stdin.Close()
+		_ = cmd.Wait()
+	}()
+
+	addr, err := bufio.NewReader(stdout).ReadString('\n')
+	if err != nil {
+		t.Fatalf("failed to read server address: %v", err)
+	}
+	addr = strings.TrimSpace(addr)
+
+	c := &HostClient{
+		Addr:  addr,
+		IsTLS: true,
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+	}
+
+	req := AcquireRequest()
+	res := AcquireResponse()
+	defer ReleaseRequest(req)
+	defer ReleaseResponse(res)
+
+	req.SetRequestURI("https://" + addr + "/warmed-tls")
+	if err := c.Do(req, res); err != nil {
+		t.Fatal(err)
+	}
+
+	baseAllocs := testing.AllocsPerRun(50, func() {
+		req.Reset()
+		res.Reset()
+		req.SetRequestURI("https://" + addr + "/warmed-tls")
+		if err := c.Do(req, res); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	timeoutAllocs := testing.AllocsPerRun(50, func() {
+		req.Reset()
+		res.Reset()
+		req.SetRequestURI("https://" + addr + "/warmed-tls")
+		if err := c.DoTimeout(req, res, 5*time.Second); err != nil {
+			t.Fatal(err)
+		}
+	})
+
 	if timeoutAllocs > baseAllocs {
-		t.Fatalf("WriteTimeout added allocations on fresh TLS connection: got %f allocs/op with timeout, baseline was %f allocs/op", timeoutAllocs, baseAllocs)
+		t.Fatalf("DoTimeout added allocations on warmed TLS connection: got %f allocs/op with DoTimeout, baseline Do was %f allocs/op", timeoutAllocs, baseAllocs)
+	}
+	if timeoutAllocs > 1 {
+		t.Fatalf("expected at most 1 alloc/op for DoTimeout on warmed TLS connection, got %f", timeoutAllocs)
 	}
 }
