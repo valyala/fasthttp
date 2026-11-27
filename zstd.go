@@ -171,7 +171,11 @@ func stacklessWriteZstd(ctx any) {
 	stacklessWriteZstdOnce.Do(func() {
 		stacklessWriteZstdFunc = stackless.NewFunc(nonblockingWriteZstd)
 	})
-	stacklessWriteZstdFunc(ctx)
+	if !stacklessWriteZstdFunc(ctx) {
+		// Fall back synchronously when the worker queue is saturated so
+		// in-memory compression does not silently drop the payload.
+		nonblockingWriteZstd(ctx)
+	}
 }
 
 func nonblockingWriteZstd(ctxv any) {
