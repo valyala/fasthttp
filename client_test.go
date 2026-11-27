@@ -9965,6 +9965,115 @@ func TestHostClientDoContext_TLSGetClientCertificateCancel(t *testing.T) {
 		t.Fatal("DialContext returning tls.Client: expected parent context to remain active when WriteTimeout elapsed")
 	}
 
+	dialOnlyTLSConfig := &tls.Config{
+		InsecureSkipVerify: true,
+		GetClientCertificate: func(info *tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			<-info.Context().Done()
+			return nil, info.Context().Err()
+		},
+	}
+	dialOnlyClient := &HostClient{
+		Addr:  ln.Addr().String(),
+		IsTLS: true,
+		DialContext: func(ctx context.Context, addr string) (net.Conn, error) {
+			var d net.Dialer
+			rawConn, err := d.DialContext(ctx, "tcp4", addr)
+			if err != nil {
+				return nil, err
+			}
+			return tls.Client(rawConn, dialOnlyTLSConfig), nil
+		},
+	}
+
+	var dialOnlyReq Request
+	var dialOnlyResp Response
+	dialOnlyReq.SetRequestURI("https://" + ln.Addr().String() + "/client-cert-dial-only-timeout")
+	dialOnlyReq.SetTimeout(50 * time.Millisecond)
+
+	err = dialOnlyClient.DoContext(context.Background(), &dialOnlyReq, &dialOnlyResp)
+	if !errors.Is(err, ErrTimeout) {
+		t.Fatalf("DialContext returning tls.Client with nil hc.TLSConfig: expected ErrTimeout, got %v", err)
+	}
+
+	_ = ln.Close()
+	<-serverDone
+}
+
+func TestHostClientDoContext_TLSGetClientCertificateContextValue(t *testing.T) {
+	t.Parallel()
+
+	type ctxKey struct{}
+
+	certData, keyData, err := GenerateTestCertificate("127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := tls.X509KeyPair(certData, keyData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverTLSConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		ClientAuth:   tls.RequestClientCert,
+	}
+
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("cannot listen: %v", err)
+	}
+	defer ln.Close()
+
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		s := &Server{
+			Handler: func(ctx *RequestCtx) {
+				ctx.SetStatusCode(StatusOK)
+			},
+		}
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(conn net.Conn) {
+				tlsConn := tls.Server(conn, serverTLSConfig)
+				_ = s.ServeConn(tlsConn)
+			}(c)
+		}
+	}()
+
+	for _, writeTimeout := range []time.Duration{0, time.Second} {
+		var gotTenant any
+		client := &HostClient{
+			Addr:         ln.Addr().String(),
+			IsTLS:        true,
+			WriteTimeout: writeTimeout,
+			TLSConfig: &tls.Config{
+				InsecureSkipVerify: true,
+				GetClientCertificate: func(info *tls.CertificateRequestInfo) (*tls.Certificate, error) {
+					gotTenant = info.Context().Value(ctxKey{})
+					return &cert, nil
+				},
+			},
+		}
+
+		ctx := context.WithValue(context.Background(), ctxKey{}, "tenant-a")
+		var req Request
+		var resp Response
+		req.SetRequestURI("https://" + ln.Addr().String() + "/client-cert-ctx-value")
+
+		if err := client.DoContext(ctx, &req, &resp); err != nil {
+			t.Fatalf("WriteTimeout=%v: unexpected error: %v", writeTimeout, err)
+		}
+		if resp.StatusCode() != StatusOK {
+			t.Fatalf("WriteTimeout=%v: expected status 200, got %d", writeTimeout, resp.StatusCode())
+		}
+		if gotTenant != "tenant-a" {
+			t.Fatalf("WriteTimeout=%v: expected tenant-a in GetClientCertificate context, got %v", writeTimeout, gotTenant)
+		}
+	}
+
 	_ = ln.Close()
 	<-serverDone
 }

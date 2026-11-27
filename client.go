@@ -2665,7 +2665,7 @@ func (c *HostClient) nextAddr() string {
 }
 
 func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err error) {
-	return c.dialHostHardContext(context.Background(), dialTimeout)
+	return c.dialHostHardContext(nil, dialTimeout)
 }
 
 func (c *HostClient) dialHostHardContext(ctx context.Context, dialTimeout time.Duration) (conn net.Conn, err error) {
@@ -2781,7 +2781,7 @@ func tlsClientHandshake(
 		}
 	}
 	var err error
-	hasCallerCtx := ctx != nil && ctx.Done() != nil
+	hasCallerCtx := ctx != nil
 	hasCertCallback := tlsConfig != nil && tlsConfig.GetClientCertificate != nil
 	if hasCallerCtx || (!deadline.IsZero() && hasCertCallback) {
 		handshakeCtx := ctx
@@ -2825,7 +2825,7 @@ func dialAddr(
 	tlsConfig *tls.Config, dialTimeout, writeTimeout time.Duration,
 ) (net.Conn, error) {
 	return dialAddrContext(
-		context.Background(), addr, dial, dialWithTimeout, nil, dialDualStack, isTLS, tlsConfig, dialTimeout, writeTimeout,
+		nil, addr, dial, dialWithTimeout, nil, dialDualStack, isTLS, tlsConfig, dialTimeout, writeTimeout,
 	)
 }
 
@@ -4221,7 +4221,7 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		}
 		cc.readDeadlineSet = true
 	}
-	hasCallerCtx := req.ctx != nil && req.ctx.Done() != nil
+	hasCallerCtx := req.ctx != nil
 	hasCertCallback := hc.TLSConfig != nil && hc.TLSConfig.GetClientCertificate != nil
 	if hc.IsTLS && (hasCallerCtx || (hasCertCallback && !writeDeadline.IsZero())) {
 		if tlsConn, ok := conn.(interface{ HandshakeContext(context.Context) error }); ok {
