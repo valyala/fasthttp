@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"testing"
@@ -174,5 +175,147 @@ func TestWriterHighLoad(t *testing.T) {
 	got, err := io.ReadAll(r)
 	if err != nil || string(got) != "second stream" {
 		t.Fatalf("decoded %q, %v; want only the second stream", got, err)
+	}
+}
+
+type failingPartialWriter struct {
+	dst       io.Writer
+	failWrite bool
+	failFlush bool
+	err       error
+}
+
+func (f *failingPartialWriter) Write(p []byte) (int, error) {
+	if f.failWrite {
+		_, _ = f.dst.Write([]byte("stale-partial"))
+		return 0, f.err
+	}
+	return f.dst.Write(p)
+}
+
+func (f *failingPartialWriter) Flush() error {
+	if f.failFlush {
+		_, _ = f.dst.Write([]byte("stale-flush"))
+		return f.err
+	}
+	return nil
+}
+
+func (f *failingPartialWriter) Close() error {
+	return nil
+}
+
+func (f *failingPartialWriter) Reset(w io.Writer) {
+	f.dst = w
+}
+
+func TestWriterErrorDiscardsPartialBuffer(t *testing.T) {
+	sentinel := errors.New("encode failed")
+	var dst bytes.Buffer
+	var inner *failingPartialWriter
+	w := NewWriter(&dst, func(dst io.Writer) Writer {
+		inner = &failingPartialWriter{dst: dst, failWrite: true, err: sentinel}
+		return inner
+	})
+
+	sw, ok := w.(*writer)
+	if !ok {
+		t.Fatalf("unexpected writer type %T", w)
+	}
+
+	if _, err := w.Write([]byte("bad")); err != sentinel {
+		t.Fatalf("Write returned %v; want %v", err, sentinel)
+	}
+	if sw.xw.bb != nil {
+		t.Fatalf("internal buffer retained after Write error: %q", sw.xw.bb.B)
+	}
+
+	inner.failWrite = false
+	inner.failFlush = true
+	if err := w.Flush(); err != sentinel {
+		t.Fatalf("Flush returned %v; want %v", err, sentinel)
+	}
+	if sw.xw.bb != nil {
+		t.Fatalf("internal buffer retained after Flush error: %q", sw.xw.bb.B)
+	}
+
+	inner.failFlush = false
+	if _, err := w.Write([]byte("clean")); err != nil {
+		t.Fatalf("Write after recovery returned %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close returned %v", err)
+	}
+	if got := dst.String(); got != "clean" {
+		t.Fatalf("dst = %q; want %q", got, "clean")
+	}
+}
+
+type preambleWriter struct {
+	dst io.Writer
+}
+
+func (p *preambleWriter) Write(b []byte) (int, error) {
+	return p.dst.Write(b)
+}
+
+func (p *preambleWriter) Flush() error {
+	return nil
+}
+
+func (p *preambleWriter) Close() error {
+	return nil
+}
+
+func (p *preambleWriter) Reset(w io.Writer) {
+	p.dst = w
+	_, _ = p.dst.Write([]byte("HDR:"))
+}
+
+func TestWriterResetUpdatesDestinationBeforeOpReset(t *testing.T) {
+	var first, second bytes.Buffer
+	w := NewWriter(&first, func(dst io.Writer) Writer {
+		_, _ = dst.Write([]byte("HDR:"))
+		return &preambleWriter{dst: dst}
+	})
+
+	if _, err := w.Write([]byte("one")); err != nil {
+		t.Fatalf("first Write returned %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("first Close returned %v", err)
+	}
+	if got := first.String(); got != "HDR:one" {
+		t.Fatalf("first = %q; want %q", got, "HDR:one")
+	}
+
+	w.Reset(&second)
+	if _, err := w.Write([]byte("two")); err != nil {
+		t.Fatalf("second Write returned %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("second Close returned %v", err)
+	}
+	if got := first.String(); got != "HDR:one" {
+		t.Fatalf("first corrupted by Reset: got %q; want %q", got, "HDR:one")
+	}
+	if got := second.String(); got != "HDR:two" {
+		t.Fatalf("second = %q; want %q", got, "HDR:two")
+	}
+
+	// Resetting from a nil initial destination must not panic.
+	var third bytes.Buffer
+	wNil := NewWriter(nil, func(dst io.Writer) Writer {
+		return &preambleWriter{dst: dst}
+	})
+	wNil.Reset(&third)
+	if _, err := wNil.Write([]byte("ok")); err != nil {
+		t.Fatalf("third Write returned %v", err)
+	}
+	if err := wNil.Close(); err != nil {
+		t.Fatalf("third Close returned %v", err)
+	}
+	if got := third.String(); got != "HDR:ok" {
+		t.Fatalf("third = %q; want %q", got, "HDR:ok")
 	}
 }
