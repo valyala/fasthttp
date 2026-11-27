@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"io"
 	"net"
@@ -173,18 +174,65 @@ func TestCloseNowUnblocksRead(t *testing.T) {
 }
 
 // Closing the connection closes the socket at once, although the handler has
-// not returned.
+// not returned, and gives its place under MaxConnsPerIP back.
 func TestCloseNowClosesSocketBeforeHandlerReturns(t *testing.T) {
-	release := make(chan struct{})
-	defer close(release)
-	ts := startServer(t, nil, func(c *Conn) {
-		_ = c.CloseNow()
-		<-release
-	})
-	c := ts.dial(t, nil)
-	_ = c.nc.SetReadDeadline(time.Now().Add(5 * time.Second))
-	if _, err := c.nc.Read(make([]byte, 1)); err == nil || isTimeout(err) {
-		t.Fatalf("the socket is still open: %v", err)
+	certPEM, keyPEM, err := fasthttp.GenerateTestCertificate("example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The server's wrappers must not hide the socket.
+	for _, tt := range []struct {
+		name          string
+		maxConnsPerIP int
+		proxyProtocol bool
+		tls           bool
+	}{
+		{name: "plain"},
+		{name: "MaxConnsPerIP", maxConnsPerIP: 1},
+		{name: "ProxyProtocol", maxConnsPerIP: 1, proxyProtocol: true},
+		{name: "TLS", maxConnsPerIP: 1, tls: true},
+		{name: "ProxyProtocol TLS", maxConnsPerIP: 1, proxyProtocol: true, tls: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			release := make(chan struct{})
+			defer close(release)
+			closed := make(chan bool, 2)
+			ts := startServerWith(t, nil, func(c *Conn) {
+				_ = c.CloseNow()
+				closed <- c.vw != nil
+				<-release
+			}, func(s *fasthttp.Server) {
+				s.MaxConnsPerIP = tt.maxConnsPerIP
+				s.ProxyProtocol = tt.proxyProtocol
+				if tt.tls {
+					s.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
+				}
+			})
+			if tt.proxyProtocol {
+				ts.preface = "PROXY TCP4 192.0.2.1 192.0.2.2 1000 80\r\n"
+			}
+			c := ts.dial(t, nil)
+			_ = c.nc.SetReadDeadline(time.Now().Add(5 * time.Second))
+			if _, err := c.nc.Read(make([]byte, 1)); err == nil || isTimeout(err) {
+				t.Fatalf("the socket is still open: %v", err)
+			}
+
+			select {
+			case vectored := <-closed:
+				if vectored == tt.tls {
+					t.Fatalf("writes with writev: %v", vectored)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("CloseNow did not return")
+			}
+			// The address can connect again while the handler runs.
+			ts.dial(t, nil)
+		})
 	}
 }
 

@@ -106,6 +106,9 @@ type Conn struct {
 	r  io.Reader
 	nc net.Conn
 	vw net.Conn // The TCP or Unix socket under an accepted nc, or nil: written with writev, closed first.
+	// The server's wrapper for MaxConnsPerIP or ProxyProtocol under an
+	// accepted nc, or nil: closed with the connection.
+	wrapper net.Conn
 
 	readBuf *buffer
 	iov     net.Buffers // Over iovBuf; WriteTo consumes it.
@@ -169,7 +172,7 @@ func newConn(nc net.Conn, r io.Reader, client bool, subprotocol string, cfg conn
 	c.wrWatch.c = c
 	c.wrWatch.write = true
 	if !client {
-		c.vw = vectorWriter(nc)
+		c.vw, c.wrapper = serverConn(nc)
 	}
 	return c
 }
@@ -182,14 +185,22 @@ func unwrapHijacked(nc net.Conn) net.Conn {
 	return nc
 }
 
-// vectorWriter returns the TCP or Unix socket under nc, whose writev sends a
-// header and payload at once, or nil.
-func vectorWriter(nc net.Conn) net.Conn {
-	switch raw := unwrapHijacked(nc); raw.(type) {
-	case *net.TCPConn, *net.UnixConn:
-		return raw
+// serverConn returns the TCP or Unix socket under an accepted nc, whose
+// writev sends a header and payload at once, and the wrapper the server has
+// around the connection for Server.MaxConnsPerIP or Server.ProxyProtocol;
+// either may be nil.
+func serverConn(nc net.Conn) (vw, wrapper net.Conn) {
+	raw := unwrapHijacked(nc)
+	if u, ok := nc.(interface{ UnwrappedConn() net.Conn }); ok {
+		if under := u.UnwrappedConn(); under != nil {
+			wrapper, raw = raw, under
+		}
 	}
-	return nil
+	switch raw.(type) {
+	case *net.TCPConn, *net.UnixConn:
+		vw = raw
+	}
+	return vw, wrapper
 }
 
 // Context returns a context that is cancelled when the connection is closed.
@@ -232,6 +243,10 @@ func (c *Conn) closeWith(err error) {
 		_ = c.vw.Close()
 	}
 	closeTransport(c.nc)
+	if c.wrapper != nil {
+		// Closing the server's wrapper releases the per-IP place it may hold.
+		_ = c.wrapper.Close()
+	}
 	c.ncMu.Unlock()
 }
 

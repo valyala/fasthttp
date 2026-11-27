@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -22,6 +23,11 @@ import (
 type testServer struct {
 	addr  string
 	reads chan struct{}
+
+	// preface is sent on every dialed connection ahead of the handshake.
+	preface string
+	// tls makes the client dial with TLS.
+	tls bool
 }
 
 // startServer serves h on a TCP listener: in-memory pipes cannot interrupt a
@@ -42,15 +48,24 @@ func startServerWith(t testing.TB, opts *AcceptOptions, h func(*Conn), configure
 	if err != nil {
 		t.Fatal(err)
 	}
+	return startServerOn(t, ln, opts, h, configure)
+}
+
+// startServerOn serves h on ln, as startServerWith does on a TCP listener.
+func startServerOn(t testing.TB, ln net.Listener, opts *AcceptOptions, h func(*Conn), configure func(*fasthttp.Server)) *testServer {
+	t.Helper()
 	s := &fasthttp.Server{
 		Handler: func(ctx *fasthttp.RequestCtx) {
 			_ = Accept(ctx, opts, h)
 		},
 	}
 	configure(s)
+	if s.TLSConfig != nil {
+		ln = tls.NewListener(ln, s.TLSConfig)
+	}
 	go func() { _ = s.Serve(ln) }()
 	t.Cleanup(func() { ln.Close() })
-	return &testServer{addr: ln.Addr().String(), reads: make(chan struct{}, 64)}
+	return &testServer{addr: ln.Addr().String(), reads: make(chan struct{}, 64), tls: s.TLSConfig != nil}
 }
 
 // signal sends on ch without blocking; a nil ch is ignored.
@@ -83,6 +98,12 @@ func (ts *testServer) dialOpts(opts *DialOptions) *DialOptions {
 		if err != nil {
 			return nil, err
 		}
+		if ts.preface != "" {
+			if _, err := nc.Write([]byte(ts.preface)); err != nil {
+				nc.Close()
+				return nil, err
+			}
+		}
 		return &signalConn{Conn: nc, reads: ts.reads}, nil
 	}
 	return opts
@@ -100,7 +121,13 @@ func (ts *testServer) awaitRead(t *testing.T) {
 
 func (ts *testServer) dial(t *testing.T, opts *DialOptions) *Conn {
 	t.Helper()
-	c, err := Dial(t.Context(), "ws://example.com/ws", ts.dialOpts(opts))
+	url := "ws://example.com/ws"
+	opts = ts.dialOpts(opts)
+	if ts.tls {
+		url = "wss://example.com/ws"
+		opts.TLSConfig = &tls.Config{InsecureSkipVerify: true}
+	}
+	c, err := Dial(t.Context(), url, opts)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
