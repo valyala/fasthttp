@@ -4691,6 +4691,59 @@ func TestClientRedirectAfterTransportReadsRequestURI(t *testing.T) {
 	}
 }
 
+func TestClientRedirectAbsoluteProxyTarget(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name, start, first, location, want string
+	}{
+		{"relative path", "http://example.com/dir/start?before=1", "http://example.com/dir/start?before=1", "next?after=2", "http://example.com/dir/next?after=2"},
+		{"query only", "http://example.com/dir/start?before=1", "http://example.com/dir/start?before=1", "?after=2", "http://example.com/dir/start?after=2"},
+		{"empty path", "http://example.com?before=1", "http://example.com/?before=1", "next", "http://example.com/next"},
+	} {
+		for _, hostClient := range []bool{false, true} {
+			for _, disablePathNormalizing := range []bool{false, true} {
+				for _, disableRedirectPathNormalizing := range []bool{false, true} {
+					t.Run(fmt.Sprintf("%s/host_client=%t/path=%t/redirect=%t", tc.name, hostClient,
+						disablePathNormalizing, disableRedirectPathNormalizing), func(t *testing.T) {
+						t.Parallel()
+						var targets []string
+						transport := &TransportMock{wrapperFunc: func(_ *HostClient, req *Request, resp *Response) (bool, error) {
+							// Forward proxies send the absolute URL as the request target.
+							req.SetRequestURI(req.URI().String())
+							targets = append(targets, string(req.Header.RequestURI()))
+							resp.SetStatusCode(StatusOK)
+							if len(targets) == 1 {
+								resp.SetStatusCode(StatusFound)
+								resp.Header.Set(HeaderLocation, tc.location)
+							}
+							return false, nil
+						}}
+						var doRedirects func(*Request, *Response, int) error
+						if hostClient {
+							c := &HostClient{Addr: "example.com", DisablePathNormalizing: disablePathNormalizing, Transport: transport}
+							doRedirects = c.DoRedirects
+						} else {
+							c := &Client{DisablePathNormalizing: disablePathNormalizing, Transport: transport}
+							doRedirects = c.DoRedirects
+						}
+						var req Request
+						var resp Response
+						req.SetRequestURI(tc.start)
+						req.DisableRedirectPathNormalizing = disableRedirectPathNormalizing
+						if err := doRedirects(&req, &resp, 1); err != nil {
+							t.Fatal(err)
+						}
+						if !slices.Equal(targets, []string{tc.first, tc.want}) {
+							t.Errorf("proxy request targets = %q, want [%q %q]", targets, tc.first, tc.want)
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
 func TestClientRedirectPreservesAuthorityAndFragment(t *testing.T) {
 	t.Parallel()
 
@@ -4800,38 +4853,41 @@ func TestClientRedirectBodyStreamPreservesRequestURI(t *testing.T) {
 }
 
 func BenchmarkHostClientRelativeRedirect(b *testing.B) {
-	for _, disablePathNormalizing := range []bool{false, true} {
-		b.Run(fmt.Sprintf("disable_path_normalizing=%t", disablePathNormalizing), func(b *testing.B) {
-			requests := 0
-			c := &HostClient{
-				Addr:                   "example.com",
-				DisablePathNormalizing: disablePathNormalizing,
-				Transport: &TransportMock{wrapperFunc: func(_ *HostClient, _ *Request, resp *Response) (bool, error) {
-					requests++
-					resp.SetStatusCode(StatusOK)
-					if requests%2 == 1 {
-						resp.SetStatusCode(StatusFound)
-						resp.Header.Set(HeaderLocation, "next")
-					}
-					return false, nil
-				}},
-			}
-			var req Request
-			var resp Response
-			run := func() {
-				req.SetRequestURI("http://example.com/photo%2Dfolder/ordinary/object/start")
-				req.DisableRedirectPathNormalizing = disablePathNormalizing
-				if err := c.DoRedirects(&req, &resp, 1); err != nil {
-					b.Fatal(err)
+	for _, path := range []string{"/photo%2Dfolder/ordinary/object/start", "/" + strings.Repeat("long-path/", 60) + "start"} {
+		for _, disablePathNormalizing := range []bool{false, true} {
+			b.Run(fmt.Sprintf("path_length=%d/disable_path_normalizing=%t", len(path), disablePathNormalizing), func(b *testing.B) {
+				requests := 0
+				c := &HostClient{
+					Addr:                   "example.com",
+					DisablePathNormalizing: disablePathNormalizing,
+					Transport: &TransportMock{wrapperFunc: func(_ *HostClient, _ *Request, resp *Response) (bool, error) {
+						requests++
+						resp.SetStatusCode(StatusOK)
+						if requests%2 == 1 {
+							resp.SetStatusCode(StatusFound)
+							resp.Header.Set(HeaderLocation, "next")
+						}
+						return false, nil
+					}},
 				}
-			}
-			run()
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+				var req Request
+				var resp Response
+				url := "http://example.com" + path
+				run := func() {
+					req.SetRequestURI(url)
+					req.DisableRedirectPathNormalizing = disablePathNormalizing
+					if err := c.DoRedirects(&req, &resp, 1); err != nil {
+						b.Fatal(err)
+					}
+				}
 				run()
-			}
-		})
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					run()
+				}
+			})
+		}
 	}
 }
 
