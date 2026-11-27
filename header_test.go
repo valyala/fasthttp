@@ -868,6 +868,46 @@ func TestRequestHeaderDisableSpecialHeaderSetKeepsOtherCase(t *testing.T) {
 	}
 }
 
+func TestRequestHeaderDisableSpecialHeaderAddClose(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	h.DisableSpecialHeader()
+	raw := "GET / HTTP/1.0\r\nHost: example.com\r\nConnection: upgrade\r\nConnection: keep-alive\r\n\r\n"
+	if err := h.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		t.Fatalf("unexpected header read error: %v", err)
+	}
+	if h.ConnectionClose() {
+		t.Fatal("did not expect ConnectionClose before adding close")
+	}
+
+	h.Add("Connection", "close")
+	if !h.ConnectionClose() {
+		t.Fatal("ConnectionClose stayed false after adding Connection: close")
+	}
+
+	clientConn, serverConn := net.Pipe()
+	go serveReusableResponse(serverConn)
+	hc := &HostClient{
+		Addr: "example.com:80",
+		Dial: func(string) (net.Conn, error) { return clientConn, nil },
+	}
+	var req Request
+	req.SetRequestURI("http://example.com/")
+	req.Header.DisableSpecialHeader()
+	if err := req.Header.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		t.Fatalf("unexpected request header read error: %v", err)
+	}
+	req.Header.Add("Connection", "close")
+	var resp Response
+	if err := hc.Do(&req, &resp); err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	if n := hc.IdleConnsCount(); n != 0 {
+		t.Fatalf("idle connections = %d, want 0 after adding close", n)
+	}
+}
+
 func TestRequestHeaderDisableSpecialHeaderSetSameValueHTTP10(t *testing.T) {
 	t.Parallel()
 

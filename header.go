@@ -2491,6 +2491,13 @@ func (h *RequestHeader) AddBytesKV(key, value []byte) {
 	}
 
 	h.appendNonSpecial(h.bufK, h.bufV)
+	// With special processing off, setSpecialHeader does not see the
+	// Connection field, so an appended close would leave the flag stale and
+	// HostClient could pool a connection the peer asked to close.
+	if h.disableSpecialHeader && caseInsensitiveCompare(key, strConnection) &&
+		hasHeaderValue(value, strClose) {
+		h.connectionClose = true
+	}
 }
 
 // Set sets the given 'key: value' header.
