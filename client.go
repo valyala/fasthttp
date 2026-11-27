@@ -2780,18 +2780,25 @@ func tlsClientHandshake(
 			return nil, err
 		}
 	}
-	handshakeCtx := ctx
-	if handshakeCtx == nil {
-		handshakeCtx = context.Background()
-	}
-	if !deadline.IsZero() {
-		if ctxDeadline, ok := handshakeCtx.Deadline(); !ok || deadline.Before(ctxDeadline) {
-			var cancel context.CancelFunc
-			handshakeCtx, cancel = context.WithDeadline(handshakeCtx, deadline)
-			defer cancel()
+	var err error
+	hasCallerCtx := ctx != nil && ctx.Done() != nil
+	hasCertCallback := tlsConfig != nil && tlsConfig.GetClientCertificate != nil
+	if hasCallerCtx || (!deadline.IsZero() && hasCertCallback) {
+		handshakeCtx := ctx
+		if handshakeCtx == nil {
+			handshakeCtx = context.Background()
 		}
+		if !deadline.IsZero() {
+			if ctxDeadline, ok := handshakeCtx.Deadline(); !ok || deadline.Before(ctxDeadline) {
+				var cancel context.CancelFunc
+				handshakeCtx, cancel = context.WithDeadline(handshakeCtx, deadline)
+				defer cancel()
+			}
+		}
+		err = conn.HandshakeContext(handshakeCtx)
+	} else {
+		err = conn.Handshake()
 	}
-	err := conn.HandshakeContext(handshakeCtx)
 	if ctxErr := contextErr(ctx); ctxErr != nil {
 		return nil, ctxErr
 	}
@@ -4183,10 +4190,12 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	resp.ParseNetConn(conn)
 
 	writeDeadline := deadline
+	writeTimeoutWon := false
 	if hc.WriteTimeout > 0 {
 		tmpWriteDeadline := time.Now().Add(hc.WriteTimeout)
 		if writeDeadline.IsZero() || tmpWriteDeadline.Before(writeDeadline) {
 			writeDeadline = tmpWriteDeadline
+			writeTimeoutWon = true
 		}
 	}
 
@@ -4212,7 +4221,9 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		}
 		cc.readDeadlineSet = true
 	}
-	if hc.IsTLS && (req.ctx != nil || !deadline.IsZero()) {
+	hasCallerCtx := req.ctx != nil && req.ctx.Done() != nil
+	hasCertCallback := hc.TLSConfig != nil && hc.TLSConfig.GetClientCertificate != nil
+	if hc.IsTLS && (hasCallerCtx || (hasCertCallback && !writeDeadline.IsZero())) {
 		if tlsConn, ok := conn.(interface{ HandshakeContext(context.Context) error }); ok {
 			handshakeComplete := false
 			if csConn, ok := conn.(interface{ ConnectionState() tls.ConnectionState }); ok {
@@ -4224,9 +4235,9 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 					handshakeCtx = context.Background()
 				}
 				var cancel context.CancelFunc
-				if !deadline.IsZero() {
-					if ctxDeadline, ok := handshakeCtx.Deadline(); !ok || deadline.Before(ctxDeadline) {
-						handshakeCtx, cancel = context.WithDeadline(handshakeCtx, deadline)
+				if !writeDeadline.IsZero() {
+					if ctxDeadline, ok := handshakeCtx.Deadline(); !ok || writeDeadline.Before(ctxDeadline) {
+						handshakeCtx, cancel = context.WithDeadline(handshakeCtx, writeDeadline)
 					}
 				}
 				err = tlsConn.HandshakeContext(handshakeCtx)
@@ -4235,9 +4246,17 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 				}
 				if err != nil {
 					if x, ok := err.(interface{ Timeout() bool }); ok && x.Timeout() {
-						err = ErrTimeout
+						if writeTimeoutWon {
+							err = ErrTLSHandshakeTimeout
+						} else {
+							err = ErrTimeout
+						}
 					} else if errors.Is(err, context.DeadlineExceeded) {
-						err = ErrTimeout
+						if writeTimeoutWon {
+							err = ErrTLSHandshakeTimeout
+						} else {
+							err = ErrTimeout
+						}
 					}
 					watcher.stop()
 					hc.CloseConn(cc)

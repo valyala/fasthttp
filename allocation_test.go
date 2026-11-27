@@ -340,11 +340,8 @@ func TestAllocationClient_FreshTLSDial_WriteTimeout(t *testing.T) {
 		}
 	})
 
-	// tlsClientHandshake wraps the handshake context with context.WithDeadline
-	// when WriteTimeout is set so callbacks such as GetClientCertificate observe
-	// the effective handshake deadline via info.Context().
-	if timeoutAllocs > baseAllocs+15 {
-		t.Fatalf("WriteTimeout added unexpected allocations on fresh TLS connection: got %f allocs/op with timeout, baseline was %f allocs/op", timeoutAllocs, baseAllocs)
+	if timeoutAllocs > baseAllocs {
+		t.Fatalf("WriteTimeout added allocations on fresh TLS connection: got %f allocs/op with timeout, baseline was %f allocs/op", timeoutAllocs, baseAllocs)
 	}
 }
 
@@ -386,7 +383,8 @@ func TestAllocationClient_WarmedTLSDial_DoTimeout(t *testing.T) {
 	defer ReleaseRequest(req)
 	defer ReleaseResponse(res)
 
-	req.SetRequestURI("https://" + addr + "/warmed-tls")
+	url := "https://" + addr + "/warmed-tls"
+	req.SetRequestURI(url)
 	if err := c.Do(req, res); err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +392,7 @@ func TestAllocationClient_WarmedTLSDial_DoTimeout(t *testing.T) {
 	baseAllocs := testing.AllocsPerRun(50, func() {
 		req.Reset()
 		res.Reset()
-		req.SetRequestURI("https://" + addr + "/warmed-tls")
+		req.SetRequestURI(url)
 		if err := c.Do(req, res); err != nil {
 			t.Fatal(err)
 		}
@@ -403,7 +401,7 @@ func TestAllocationClient_WarmedTLSDial_DoTimeout(t *testing.T) {
 	timeoutAllocs := testing.AllocsPerRun(50, func() {
 		req.Reset()
 		res.Reset()
-		req.SetRequestURI("https://" + addr + "/warmed-tls")
+		req.SetRequestURI(url)
 		if err := c.DoTimeout(req, res, 5*time.Second); err != nil {
 			t.Fatal(err)
 		}

@@ -9927,6 +9927,44 @@ func TestHostClientDoContext_TLSGetClientCertificateCancel(t *testing.T) {
 		}
 	}
 
+	tlsClientConfig := &tls.Config{
+		InsecureSkipVerify: true,
+		GetClientCertificate: func(info *tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			<-info.Context().Done()
+			return nil, info.Context().Err()
+		},
+	}
+	dialTLSClient := &HostClient{
+		Addr:         ln.Addr().String(),
+		IsTLS:        true,
+		WriteTimeout: 25 * time.Millisecond,
+		TLSConfig:    tlsClientConfig,
+		DialContext: func(ctx context.Context, addr string) (net.Conn, error) {
+			var d net.Dialer
+			rawConn, err := d.DialContext(ctx, "tcp4", addr)
+			if err != nil {
+				return nil, err
+			}
+			return tls.Client(rawConn, tlsClientConfig), nil
+		},
+	}
+
+	parentCtx, parentCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	var tlsClientReq Request
+	var tlsClientResp Response
+	tlsClientReq.SetRequestURI("https://" + ln.Addr().String() + "/client-cert-dial-tls-client")
+
+	err = dialTLSClient.DoContext(parentCtx, &tlsClientReq, &tlsClientResp)
+	parentActive := parentCtx.Err() == nil
+	parentCancel()
+
+	if !errors.Is(err, ErrTLSHandshakeTimeout) {
+		t.Fatalf("DialContext returning tls.Client: expected ErrTLSHandshakeTimeout, got %v", err)
+	}
+	if !parentActive {
+		t.Fatal("DialContext returning tls.Client: expected parent context to remain active when WriteTimeout elapsed")
+	}
+
 	_ = ln.Close()
 	<-serverDone
 }
