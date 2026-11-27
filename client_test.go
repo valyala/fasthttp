@@ -9935,10 +9935,11 @@ func TestHostClientDoContext_TLSGetClientCertificateCancel(t *testing.T) {
 		},
 	}
 	dialTLSClient := &HostClient{
-		Addr:         ln.Addr().String(),
-		IsTLS:        true,
-		WriteTimeout: 25 * time.Millisecond,
-		TLSConfig:    tlsClientConfig,
+		Addr:                      ln.Addr().String(),
+		IsTLS:                     true,
+		MaxIdemponentCallAttempts: 1,
+		WriteTimeout:              25 * time.Millisecond,
+		TLSConfig:                 tlsClientConfig,
 		DialContext: func(ctx context.Context, addr string) (net.Conn, error) {
 			var d net.Dialer
 			rawConn, err := d.DialContext(ctx, "tcp4", addr)
@@ -10333,5 +10334,70 @@ func TestHostClientDoContext_RetryResetTimeoutCappedAtContextDeadline(t *testing
 	})
 	t.Run("SetContext_Do", func(t *testing.T) {
 		runCase(t, true)
+	})
+}
+
+func TestHostClientDoContext_DialContextTimeoutError(t *testing.T) {
+	t.Parallel()
+
+	client := &HostClient{
+		Addr: "example.invalid:80",
+		DialContext: func(ctx context.Context, addr string) (net.Conn, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	}
+
+	t.Run("DoTimeout", func(t *testing.T) {
+		t.Parallel()
+
+		var req Request
+		var resp Response
+		req.SetRequestURI("http://example.invalid/test")
+
+		err := client.DoTimeout(&req, &resp, 20*time.Millisecond)
+		if !errors.Is(err, ErrTimeout) {
+			t.Fatalf("expected ErrTimeout, got %v", err)
+		}
+	})
+
+	t.Run("DoContext_ReqTimeoutWins", func(t *testing.T) {
+		t.Parallel()
+
+		parentCtx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		defer cancel()
+
+		var req Request
+		var resp Response
+		req.SetRequestURI("http://example.invalid/test")
+		req.SetTimeout(20 * time.Millisecond)
+
+		err := client.DoContext(parentCtx, &req, &resp)
+		if !errors.Is(err, ErrTimeout) {
+			t.Fatalf("expected ErrTimeout, got %v", err)
+		}
+		if parentCtx.Err() != nil {
+			t.Fatalf("expected parent context to remain active, got %v", parentCtx.Err())
+		}
+	})
+
+	t.Run("DoContext_CallerDeadlineWins", func(t *testing.T) {
+		t.Parallel()
+
+		parentCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+
+		var req Request
+		var resp Response
+		req.SetRequestURI("http://example.invalid/test")
+		req.SetTimeout(200 * time.Millisecond)
+
+		err := client.DoContext(parentCtx, &req, &resp)
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("expected context.DeadlineExceeded, got %v", err)
+		}
+		if errors.Is(err, ErrTimeout) {
+			t.Fatalf("expected caller context error rather than ErrTimeout, got %v", err)
+		}
 	})
 }

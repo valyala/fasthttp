@@ -2153,7 +2153,7 @@ func (c *HostClient) serveWaiterLocked() bool {
 }
 
 func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool) (cc *clientConn, err error) {
-	return c.acquireConn(context.Background(), reqTimeout, connectionClose)
+	return c.acquireConn(context.Background(), false, reqTimeout, connectionClose)
 }
 
 // queueForIdle and decConnsCount manage connection pool capacity and decoupled
@@ -2162,7 +2162,7 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 //
 //nolint:contextcheck
 func (c *HostClient) acquireConn(
-	ctx context.Context, reqTimeout time.Duration, connectionClose bool,
+	ctx context.Context, hasCallerCtx bool, reqTimeout time.Duration, connectionClose bool,
 ) (cc *clientConn, err error) {
 	if ctxErr := contextErr(ctx); ctxErr != nil {
 		return nil, ctxErr
@@ -2229,10 +2229,11 @@ func (c *HostClient) acquireConn(
 
 		start := time.Now()
 		w := &wantConn{
-			ready:   make(chan struct{}, 1),
-			ctx:     ctx,
-			start:   start,
-			timeout: reqTimeout,
+			ready:        make(chan struct{}, 1),
+			ctx:          ctx,
+			hasCallerCtx: hasCallerCtx,
+			start:        start,
+			timeout:      reqTimeout,
 		}
 		defer func() {
 			if err != nil {
@@ -2267,7 +2268,7 @@ func (c *HostClient) acquireConn(
 		go c.connsCleaner()
 	}
 
-	conn, err := c.dialHostHardContext(ctx, reqTimeout)
+	conn, err := c.dialHostHardContext(ctx, hasCallerCtx, reqTimeout)
 	if err != nil {
 		c.decConnsCount()
 		return nil, err
@@ -2359,7 +2360,7 @@ func (c *HostClient) dialConnFor(w *wantConn) {
 		dialCancel()
 	}()
 
-	conn, err := c.dialHostHardContext(dialCtx, budget)
+	conn, err := c.dialHostHardContext(dialCtx, w.hasCallerCtx, budget)
 	if err != nil {
 		w.tryDeliver(nil, err)
 		c.decConnsCount()
@@ -2665,10 +2666,12 @@ func (c *HostClient) nextAddr() string {
 }
 
 func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err error) {
-	return c.dialHostHardContext(nil, dialTimeout)
+	return c.dialHostHardContext(context.Background(), false, dialTimeout)
 }
 
-func (c *HostClient) dialHostHardContext(ctx context.Context, dialTimeout time.Duration) (conn net.Conn, err error) {
+func (c *HostClient) dialHostHardContext(
+	ctx context.Context, hasCallerCtx bool, dialTimeout time.Duration,
+) (conn net.Conn, err error) {
 	if ctxErr := contextErr(ctx); ctxErr != nil {
 		return nil, ctxErr
 	}
@@ -2721,7 +2724,8 @@ func (c *HostClient) dialHostHardContext(ctx context.Context, dialTimeout time.D
 			}
 		}
 		conn, err = dialAddrContext(
-			ctx, addr, c.Dial, c.DialTimeout, c.DialContext, c.DialDualStack, c.IsTLS, tlsConfig, attemptDialTimeout, c.WriteTimeout,
+			ctx, hasCallerCtx, addr, c.Dial, c.DialTimeout, c.DialContext,
+			c.DialDualStack, c.IsTLS, tlsConfig, attemptDialTimeout, c.WriteTimeout,
 		)
 		if err == nil {
 			if ctxErr := contextErr(ctx); ctxErr != nil {
@@ -2766,7 +2770,7 @@ var ErrTLSHandshakeTimeout = errors.New("fasthttp: tls handshake timed out")
 
 //nolint:contextcheck
 func tlsClientHandshake(
-	ctx context.Context, rawConn net.Conn, tlsConfig *tls.Config, deadline time.Time,
+	ctx context.Context, hasCallerCtx bool, rawConn net.Conn, tlsConfig *tls.Config, deadline time.Time,
 ) (_ net.Conn, retErr error) {
 	defer func() {
 		if retErr != nil {
@@ -2781,7 +2785,6 @@ func tlsClientHandshake(
 		}
 	}
 	var err error
-	hasCallerCtx := ctx != nil
 	hasCertCallback := tlsConfig != nil && tlsConfig.GetClientCertificate != nil
 	if hasCallerCtx || (!deadline.IsZero() && hasCertCallback) {
 		handshakeCtx := ctx
@@ -2825,12 +2828,12 @@ func dialAddr(
 	tlsConfig *tls.Config, dialTimeout, writeTimeout time.Duration,
 ) (net.Conn, error) {
 	return dialAddrContext(
-		nil, addr, dial, dialWithTimeout, nil, dialDualStack, isTLS, tlsConfig, dialTimeout, writeTimeout,
+		context.Background(), false, addr, dial, dialWithTimeout, nil, dialDualStack, isTLS, tlsConfig, dialTimeout, writeTimeout,
 	)
 }
 
 func dialAddrContext(
-	ctx context.Context,
+	ctx context.Context, hasCallerCtx bool,
 	addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialContext DialFuncWithContext,
 	dialDualStack, isTLS bool,
 	tlsConfig *tls.Config, dialTimeout, writeTimeout time.Duration,
@@ -2877,7 +2880,7 @@ func dialAddrContext(
 			}
 			return nil, ErrTLSHandshakeTimeout
 		}
-		conn, err = tlsClientHandshake(ctx, conn, tlsConfig, deadline)
+		conn, err = tlsClientHandshake(ctx, hasCallerCtx, conn, tlsConfig, deadline)
 		if err != nil {
 			if errors.Is(err, ErrTLSHandshakeTimeout) && dialDeadlineWon {
 				return nil, ErrTimeout
@@ -2900,6 +2903,7 @@ func callDialFunc(
 		if dialCtx == nil {
 			dialCtx = context.Background()
 		}
+		reqTimeoutWon := false
 		if timeout > 0 {
 			var cancel context.CancelFunc
 			if dl, ok := dialCtx.Deadline(); ok {
@@ -2907,13 +2911,22 @@ func callDialFunc(
 				if timeoutDeadline.Before(dl) {
 					dialCtx, cancel = context.WithDeadline(dialCtx, timeoutDeadline)
 					defer cancel()
+					reqTimeoutWon = true
 				}
 			} else {
 				dialCtx, cancel = context.WithTimeout(dialCtx, timeout)
 				defer cancel()
+				reqTimeoutWon = true
 			}
 		}
-		return dialContext(dialCtx, addr)
+		conn, err := dialContext(dialCtx, addr)
+		if err != nil && reqTimeoutWon && errors.Is(err, context.DeadlineExceeded) && contextErr(ctx) == nil {
+			if conn != nil {
+				_ = conn.Close()
+			}
+			return nil, ErrTimeout
+		}
+		return conn, err
 	}
 
 	if dialWithTimeout != nil {
@@ -2977,14 +2990,15 @@ func AddMissingPort(addr string, isTLS bool) string {
 //
 // Inspired by net/http/transport.go.
 type wantConn struct {
-	err        error
-	ready      chan struct{}
-	conn       *clientConn
-	ctx        context.Context //nolint:containedctx
-	dialCancel context.CancelFunc
-	start      time.Time
-	timeout    time.Duration
-	mu         sync.Mutex // protects conn, err, dialCancel, close(ready)
+	err          error
+	ready        chan struct{}
+	conn         *clientConn
+	ctx          context.Context //nolint:containedctx
+	hasCallerCtx bool
+	dialCancel   context.CancelFunc
+	start        time.Time
+	timeout      time.Duration
+	mu           sync.Mutex // protects conn, err, dialCancel, close(ready)
 }
 
 // waiting reports whether w is still waiting for an answer (connection or error).
@@ -4176,7 +4190,12 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		}
 	}
 
-	cc, err := hc.acquireConn(req.ctx, req.timeout, req.ConnectionClose())
+	acquireCtx := req.ctx
+	hasCallerCtx := acquireCtx != nil
+	if acquireCtx == nil {
+		acquireCtx = context.Background()
+	}
+	cc, err := hc.acquireConn(acquireCtx, hasCallerCtx, req.timeout, req.ConnectionClose())
 	if err != nil {
 		if ctxErr := contextErr(req.ctx); ctxErr != nil {
 			return false, ctxErr
@@ -4221,7 +4240,6 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		}
 		cc.readDeadlineSet = true
 	}
-	hasCallerCtx := req.ctx != nil
 	hasCertCallback := hc.TLSConfig != nil && hc.TLSConfig.GetClientCertificate != nil
 	if hc.IsTLS && (hasCallerCtx || (hasCertCallback && !writeDeadline.IsZero())) {
 		if tlsConn, ok := conn.(interface{ HandshakeContext(context.Context) error }); ok {

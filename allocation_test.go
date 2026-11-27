@@ -343,6 +343,57 @@ func TestAllocationClient_FreshTLSDial_WriteTimeout(t *testing.T) {
 	if timeoutAllocs > baseAllocs {
 		t.Fatalf("WriteTimeout added allocations on fresh TLS connection: got %f allocs/op with timeout, baseline was %f allocs/op", timeoutAllocs, baseAllocs)
 	}
+
+	// 3. Measure AcquireConn fresh TLS connection allocations with WriteTimeout set
+	cc, err := cNoTimeout.AcquireConn(0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsConn, ok := cc.c.(*tls.Conn)
+	if !ok {
+		cNoTimeout.CloseConn(cc)
+		t.Fatalf("expected *tls.Conn, got %T", cc.c)
+	}
+	if err := tlsConn.Handshake(); err != nil {
+		cNoTimeout.CloseConn(cc)
+		t.Fatal(err)
+	}
+	cNoTimeout.CloseConn(cc)
+
+	acquireBaseAllocs := testing.AllocsPerRun(20, func() {
+		cc, err := cNoTimeout.AcquireConn(0, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tlsConn, ok := cc.c.(*tls.Conn)
+		if !ok {
+			cNoTimeout.CloseConn(cc)
+			t.Fatalf("expected *tls.Conn, got %T", cc.c)
+		}
+		if err := tlsConn.Handshake(); err != nil {
+			cNoTimeout.CloseConn(cc)
+			t.Fatal(err)
+		}
+		cNoTimeout.CloseConn(cc)
+	})
+
+	cc, err = cWithTimeout.AcquireConn(0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cWithTimeout.CloseConn(cc)
+
+	acquireTimeoutAllocs := testing.AllocsPerRun(20, func() {
+		cc, err := cWithTimeout.AcquireConn(0, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cWithTimeout.CloseConn(cc)
+	})
+
+	if acquireTimeoutAllocs > acquireBaseAllocs {
+		t.Fatalf("AcquireConn with WriteTimeout added allocations on fresh TLS connection: got %f allocs/op with timeout, baseline was %f allocs/op", acquireTimeoutAllocs, acquireBaseAllocs)
+	}
 }
 
 func TestAllocationClient_WarmedTLSDial_DoTimeout(t *testing.T) {
