@@ -126,6 +126,146 @@ func TestClientConnectionCounts(t *testing.T) {
 	}
 }
 
+func TestHostClientConnectionUpgradeEOFBodyNotReused(t *testing.T) {
+	t.Parallel()
+
+	for _, stream := range []bool{false, true} {
+		ln := fasthttputil.NewInmemoryListener()
+		go func() {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			var req Request
+			if err := req.Read(bufio.NewReader(conn)); err != nil {
+				t.Error(err)
+				return
+			}
+			// No Content-Length and not chunked: the body ends at EOF.
+			wire := "HTTP/1.1 200 OK\r\nConnection: keep-alive\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\nfoobar"
+			_, _ = conn.Write([]byte(wire))
+		}()
+
+		c := &HostClient{
+			Addr:               "example.com",
+			Dial:               func(string) (net.Conn, error) { return ln.Dial() },
+			StreamResponseBody: stream,
+		}
+		var req Request
+		var resp Response
+		req.SetRequestURI("http://example.com/")
+		if err := c.Do(&req, &resp); err != nil {
+			t.Fatalf("stream=%v: %v", stream, err)
+		}
+		var body []byte
+		if stream {
+			var err error
+			if body, err = io.ReadAll(resp.BodyStream()); err != nil {
+				t.Fatalf("stream=%v: %v", stream, err)
+			}
+			if err = resp.CloseBodyStream(); err != nil {
+				t.Fatalf("stream=%v: %v", stream, err)
+			}
+		} else {
+			body = resp.Body()
+		}
+		if string(body) != "foobar" {
+			t.Errorf("stream=%v: unexpected body %q. Expecting %q", stream, body, "foobar")
+		}
+		if n := c.IdleConnsCount(); n != 0 {
+			t.Errorf("stream=%v: unexpected idle connection count %d. Expecting %d", stream, n, 0)
+		}
+		ln.Close()
+	}
+}
+
+func TestClientConnectionUpgradeEOFBodySkipBodyConnectionClose(t *testing.T) {
+	t.Parallel()
+
+	dialer := func() (func(string) (net.Conn, error), func()) {
+		ln := fasthttputil.NewInmemoryListener()
+		go func() {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			var req Request
+			if err := req.Read(bufio.NewReader(conn)); err != nil {
+				t.Error(err)
+				return
+			}
+			// No Content-Length and not chunked: the body ends at EOF.
+			wire := "HTTP/1.1 200 OK\r\nConnection: keep-alive\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\nfoobar"
+			_, _ = conn.Write([]byte(wire))
+		}()
+		return func(string) (net.Conn, error) { return ln.Dial() }, func() { ln.Close() }
+	}
+
+	hostDial, hostClose := dialer()
+	defer hostClose()
+	pipelineDial, pipelineClose := dialer()
+	defer pipelineClose()
+	for name, do := range map[string]func(*Request, *Response) error{
+		"HostClient":     (&HostClient{Addr: "example.com", Dial: hostDial}).Do,
+		"PipelineClient": (&PipelineClient{Addr: "example.com", Dial: pipelineDial}).Do,
+	} {
+		var req Request
+		var resp Response
+		resp.SkipBody = true
+		req.SetRequestURI("http://example.com/")
+		if err := do(&req, &resp); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !resp.ConnectionClose() {
+			t.Errorf("%s: expecting 'Connection: close' on a response with a body that ends at EOF", name)
+		}
+	}
+}
+
+func TestHostClientConnectionUpgradeHeadResponseReused(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	defer ln.Close()
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		br := bufio.NewReader(conn)
+		var req Request
+		if err := req.Read(br); err != nil {
+			t.Error(err)
+			return
+		}
+		// A HEAD response has no body, so no Content-Length doesn't mean EOF framing.
+		_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\n"))
+		_, _ = br.ReadByte() // keep the connection open until the client closes it
+	}()
+
+	c := &HostClient{
+		Addr: "example.com",
+		Dial: func(string) (net.Conn, error) { return ln.Dial() },
+	}
+	defer c.CloseIdleConnections()
+	var req Request
+	var resp Response
+	req.Header.SetMethod(MethodHead)
+	req.SetRequestURI("http://example.com/")
+	if err := c.Do(&req, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.ConnectionClose() {
+		t.Error("unexpected 'Connection: close' on a HEAD response")
+	}
+	if n := c.IdleConnsCount(); n != 1 {
+		t.Errorf("unexpected idle connection count %d. Expecting %d", n, 1)
+	}
+}
+
 func TestClientStreamCloseWaitsForRead(t *testing.T) {
 	t.Parallel()
 

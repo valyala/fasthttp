@@ -1701,6 +1701,53 @@ func testResponseHeaderConnectionUpgrade(t *testing.T, s string, isUpgrade, isKe
 	}
 }
 
+func TestHeaderConnectionUpgradeRepeatedField(t *testing.T) {
+	t.Parallel()
+
+	var req RequestHeader
+	wire := "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: keep-alive\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"
+	if err := req.Read(bufio.NewReader(strings.NewReader(wire))); err != nil {
+		t.Fatal(err)
+	}
+	if !req.ConnectionUpgrade() {
+		t.Error("RequestHeader.ConnectionUpgrade() = false, want true")
+	}
+
+	var resp ResponseHeader
+	wire = "HTTP/1.1 101 Switching Protocols\r\nConnection: keep-alive\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"
+	if err := resp.Read(bufio.NewReader(strings.NewReader(wire))); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.ConnectionUpgrade() {
+		t.Error("ResponseHeader.ConnectionUpgrade() = false, want true")
+	}
+	// A 101 response has no body, so the missing Content-Length must not close the connection.
+	if resp.ConnectionClose() {
+		t.Error("ResponseHeader.ConnectionClose() = true, want false")
+	}
+}
+
+func TestRequestHeaderConnectionUpgradeCloseDisableSpecialHeader(t *testing.T) {
+	t.Parallel()
+
+	for _, disableNormalizing := range []bool{false, true} {
+		var h RequestHeader
+		h.DisableSpecialHeader()
+		wire := "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"
+		if disableNormalizing {
+			// The header names stay lowercase, so they are matched case-insensitively.
+			h.DisableNormalizing()
+			wire = "GET / HTTP/1.1\r\nHost: example.com\r\nconnection: close\r\nconnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"
+		}
+		if err := h.Read(bufio.NewReader(strings.NewReader(wire))); err != nil {
+			t.Fatal(err)
+		}
+		if h.ConnectionUpgrade() {
+			t.Errorf("disableNormalizing=%v: RequestHeader.ConnectionUpgrade() = true, want false", disableNormalizing)
+		}
+	}
+}
+
 func TestRequestHeaderConnectionUpgrade(t *testing.T) {
 	t.Parallel()
 

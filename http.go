@@ -1968,6 +1968,11 @@ func (resp *Response) readLimitBody(r *bufio.Reader, maxBodySize int, head, conn
 		if err != nil {
 			return err
 		}
+	} else if resp.Header.ContentLength() == -2 && !resp.headResponse &&
+		!resp.isConnectTunnel() && !resp.Header.mustSkipContentLength() {
+		// Only SkipBody keeps this body from being read. It still ends at EOF,
+		// so the connection can't be reused, as in ReadBody.
+		resp.Header.SetConnectionClose()
 	}
 
 	// A response without a body can't have trailers.
@@ -1997,6 +2002,11 @@ func (resp *Response) ReadBody(r *bufio.Reader, maxBodySize int) (err error) {
 	bodyBuf.Reset()
 
 	contentLength := resp.Header.ContentLength()
+	if contentLength == -2 {
+		// The body ends at EOF, so the connection can't be reused. The header
+		// parser leaves this out for 'Connection: Upgrade', which may have no body.
+		resp.Header.SetConnectionClose()
+	}
 	if resp.StreamBody {
 		resp.bodyStream = acquireResponseStream(bodyBuf, r, &resp.Header)
 		return nil
