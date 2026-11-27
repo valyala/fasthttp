@@ -3808,6 +3808,11 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		// The body of this response was left unread on the connection,
 		// so the next response read from it would start inside that body.
 		closeConn = true
+		if resp.Header.ContentLength() == -2 {
+			// An EOF-delimited body means the peer closed. Callers reading
+			// resp.ConnectionClose() must see that too, not just the pool.
+			resp.Header.SetConnectionClose()
+		}
 	}
 	if customStreamBody && resp.bodyStream != nil {
 		// releaseConn runs when the caller closes the body stream, so it has to

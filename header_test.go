@@ -868,6 +868,75 @@ func TestRequestHeaderDisableSpecialHeaderSetKeepsOtherCase(t *testing.T) {
 	}
 }
 
+func TestRequestHeaderDelExplicitCloseAndCopy(t *testing.T) {
+	t.Parallel()
+
+	// SetConnectionClose is a decision independent of any field. Deleting a
+	// Connection field that is not there must not drop it.
+	var explicit RequestHeader
+	explicit.DisableSpecialHeader()
+	explicit.DisableNormalizing()
+	if err := explicit.Read(bufio.NewReader(strings.NewReader(
+		"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"))); err != nil {
+		t.Fatalf("unexpected header read error: %v", err)
+	}
+	explicit.SetConnectionClose()
+	explicit.Del("connection")
+	if !explicit.ConnectionClose() {
+		t.Fatal("explicit close was cleared by a no-op delete")
+	}
+
+	clientConn, serverConn := net.Pipe()
+	go serveReusableResponse(serverConn)
+	hc := &HostClient{
+		Addr: "example.com:80",
+		Dial: func(string) (net.Conn, error) { return clientConn, nil },
+	}
+	var req Request
+	req.SetRequestURI("http://example.com/")
+	req.Header.DisableSpecialHeader()
+	req.Header.DisableNormalizing()
+	if err := req.Header.Read(bufio.NewReader(strings.NewReader(
+		"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"))); err != nil {
+		t.Fatalf("unexpected request header read error: %v", err)
+	}
+	req.Header.SetConnectionClose()
+	req.Header.Del("connection")
+	var resp Response
+	if err := hc.Do(&req, &resp); err != nil {
+		t.Fatalf("FIRST Do: %v", err)
+	}
+	if n := hc.IdleConnsCount(); n != 0 {
+		t.Fatalf("idle connections = %d, want 0 (explicit close survives)", n)
+	}
+
+	// The reverse: a close parsed from a field is not explicit. Deleting the
+	// only close field from a copy must clear the flag on that copy.
+	var source RequestHeader
+	source.DisableSpecialHeader()
+	source.DisableNormalizing()
+	if err := source.Read(bufio.NewReader(strings.NewReader(
+		"GET / HTTP/1.1\r\nHost: example.com\r\nconnection: close\r\n\r\n"))); err != nil {
+		t.Fatalf("unexpected header read error: %v", err)
+	}
+	var copied RequestHeader
+	source.CopyTo(&copied)
+	copied.Del("connection")
+	if copied.ConnectionClose() {
+		t.Fatal("parsed close survived deleting its only field on the copy")
+	}
+	if vals := copied.PeekAll("Connection"); len(vals) != 0 {
+		t.Fatalf("PeekAll(Connection) = %q, want none", vals)
+	}
+
+	// The copy writes no Connection field, so it can be reused.
+	wire := string(copied.Header())
+	if strings.Contains(wire, "Connection:") {
+		t.Fatalf("copy still writes a Connection field: %q", wire)
+	}
+
+}
+
 func TestRequestHeaderDisableSpecialHeaderAddClose(t *testing.T) {
 	t.Parallel()
 

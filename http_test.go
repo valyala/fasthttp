@@ -6675,7 +6675,7 @@ func TestResponseHTTP10UpgradeKeepAliveEOFDelimitedSkippedBody(t *testing.T) {
 	// A caller that sets SkipBody on a GET never reads the EOF-delimited body.
 	// The peer has closed, so HostClient must discard the connection instead of
 	// pooling it. A HEAD response carries no body, so it may still be reused.
-	run := func(method string, wantIdle int) {
+	run := func(method string, wantIdle int, wantClose bool) {
 		clientConn, serverConn := net.Pipe()
 		go func() {
 			defer serverConn.Close()
@@ -6716,6 +6716,9 @@ func TestResponseHTTP10UpgradeKeepAliveEOFDelimitedSkippedBody(t *testing.T) {
 		if n := hc.IdleConnsCount(); n != wantIdle {
 			t.Fatalf("%s: %d idle connections, want %d", method, n, wantIdle)
 		}
+		if got := resp.ConnectionClose(); got != wantClose {
+			t.Fatalf("%s: ConnectionClose = %v, want %v", method, got, wantClose)
+		}
 		if method == MethodHead {
 			var req2 Request
 			req2.SetRequestURI("http://example.com/")
@@ -6728,6 +6731,6 @@ func TestResponseHTTP10UpgradeKeepAliveEOFDelimitedSkippedBody(t *testing.T) {
 		clientConn.Close()
 	}
 
-	run(MethodGet, 0)
-	run(MethodHead, 1)
+	run(MethodGet, 0, true)
+	run(MethodHead, 1, false)
 }
