@@ -2008,24 +2008,37 @@ func (h *RequestHeader) del(key []byte) {
 	// behind. With the default settings the close was consumed into the flag
 	// and no field was stored at all.
 	if caseInsensitiveCompare(strConnection, key) {
+		// A close stored under the canonical spelling belongs to that field.
+		// Deleting the field drops the provenance even if another close
+		// field is still on the wire.
+		canonicalField := false
+		if bytes.Equal(key, strConnection) {
+			for i := range h.h {
+				if bytes.Equal(h.h[i].key, strConnection) &&
+					hasHeaderValue(h.h[i].value, strClose) {
+					canonicalField = true
+					break
+				}
+			}
+		}
 		h.h = delAllArgs(h.h, b2s(key))
 		h.trailerH = delAllArgs(h.trailerH, b2s(key))
+		if canonicalField {
+			h.canonicalClose = false
+		}
 		closeField := hasConnectionCloseValue(h.h) || hasConnectionCloseValue(h.trailerH)
 		noHTTP11Close := h.noHTTP11 && !hasConnectionKeepAliveValue(h.h) &&
 			!hasConnectionKeepAliveValue(h.trailerH)
-		if closeField || noHTTP11Close {
+		switch {
+		case closeField || noHTTP11Close:
 			// A surviving close field, or the HTTP/1.0 default with the last
 			// keep-alive gone.
 			h.connectionClose = true
-		} else if h.canonicalClose {
-			// The close belongs to the canonical option. Only deleting that
-			// spelling clears it; a differently cased field is unrelated.
-			if bytes.Equal(key, strConnection) {
-				h.connectionClose = false
-			}
-		} else {
-			// The close came from a differently cased field. Deleting that
-			// field removes it, so no close is left to keep.
+		case h.canonicalClose && !bytes.Equal(key, strConnection):
+			// The canonical close was consumed into the flag; deleting a
+			// different spelling does not remove it.
+			h.connectionClose = true
+		default:
 			h.connectionClose = false
 		}
 		return
@@ -2600,7 +2613,13 @@ func (h *RequestHeader) SetCanonical(key, value []byte) {
 		closeField := hasConnectionCloseValue(h.h) || hasConnectionCloseValue(h.trailerH)
 		noHTTP11Close := h.noHTTP11 && !hasConnectionKeepAliveValue(h.h) &&
 			!hasConnectionKeepAliveValue(h.trailerH)
-		h.connectionClose = closeField || noHTTP11Close
+		// A close set through SetConnectionClose is not tied to any field, so
+		// replacing a differently spelled Connection value must not drop it.
+		if h.canonicalClose && !bytes.Equal(key, strConnection) {
+			h.connectionClose = true
+		} else {
+			h.connectionClose = closeField || noHTTP11Close
+		}
 		if bytes.Equal(key, strConnection) && hasHeaderValue(h.bufV, strClose) {
 			h.canonicalClose = true
 		}

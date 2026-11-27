@@ -1963,6 +1963,15 @@ func (resp *Response) readLimitBody(r *bufio.Reader, maxBodySize int, head, conn
 		}
 	}
 
+	// An EOF-delimited body means the peer closed. A caller that skips the
+	// body must still see that in ConnectionClose(), through Response.Read or
+	// PipelineClient as well as HostClient. HEAD, a successful CONNECT and
+	// status codes without a body are excluded here, since they end at the
+	// header and may keep the connection.
+	if resp.SkipBody && !resp.headResponse && !resp.isConnectTunnel() &&
+		!resp.Header.mustSkipContentLength() && resp.Header.ContentLength() == -2 {
+		resp.Header.SetConnectionClose()
+	}
 	if !resp.mustSkipBody() {
 		err = resp.ReadBody(r, maxBodySize)
 		if err != nil {

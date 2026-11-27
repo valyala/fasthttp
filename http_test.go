@@ -6669,6 +6669,30 @@ func TestRequestBodyStreamWarning(t *testing.T) {
 	}
 }
 
+func TestResponseReadEOFDelimitedSkipBodySetsClose(t *testing.T) {
+	t.Parallel()
+
+	wire := "HTTP/1.0 200 OK\r\nConnection: upgrade\r\nConnection: keep-alive\r\n\r\nbody"
+	read := func(head, connect bool) bool {
+		var resp Response
+		resp.SkipBody = true
+		br := bufio.NewReader(strings.NewReader(wire))
+		if err := resp.readLimitBody(br, 0, head, connect); err != nil {
+			t.Fatalf("readLimitBody: %v", err)
+		}
+		return resp.ConnectionClose()
+	}
+	if !read(false, false) {
+		t.Fatal("Response.Read with SkipBody did not mark an EOF-delimited body closed")
+	}
+	if read(true, false) {
+		t.Fatal("a HEAD response must stay reusable")
+	}
+	if read(false, true) {
+		t.Fatal("a successful CONNECT must stay a tunnel, regardless of SkipBody")
+	}
+}
+
 func TestResponseHTTP10UpgradeKeepAliveEOFDelimitedSkippedBody(t *testing.T) {
 	t.Parallel()
 
