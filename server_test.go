@@ -5424,6 +5424,43 @@ func TestRequestCtxNoHijackNoResponse(t *testing.T) {
 	}
 }
 
+func TestRequestCtxHijackNoResponseGetter(t *testing.T) {
+	t.Parallel()
+
+	n := 0
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			n++
+			if ctx.HijackNoResponse() {
+				t.Errorf("request %d: HijackNoResponse must be false before HijackSetNoResponse", n)
+			}
+			ctx.HijackSetNoResponse(true)
+			if !ctx.HijackNoResponse() {
+				t.Errorf("request %d: HijackNoResponse must be true after HijackSetNoResponse(true)", n)
+			}
+		},
+	}
+
+	// The second request reuses the ctx and must not see the first one's setting.
+	rw := &readWriter{}
+	rw.r.WriteString("GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n")
+	rw.r.WriteString("GET /bar HTTP/1.1\r\nHost: google.com\r\n\r\n")
+
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from serveConn: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("expected 2 requests, got %d", n)
+	}
+
+	var ctx RequestCtx
+	ctx.HijackSetNoResponse(true)
+	ctx.reset()
+	if ctx.HijackNoResponse() {
+		t.Fatal("HijackNoResponse must be false after reset")
+	}
+}
+
 func TestRequestCtxInit(t *testing.T) {
 	var ctx RequestCtx
 	var logger testLogger
