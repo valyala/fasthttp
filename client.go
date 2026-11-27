@@ -462,6 +462,7 @@ func (c *Client) Post(dst []byte, url string, postArgs *Args) (statusCode int, b
 func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	req.timeout = timeout
 	if req.timeout <= 0 {
+		clearStatusOnFailedRequest(resp)
 		return ErrTimeout
 	}
 	return c.Do(req, resp)
@@ -494,6 +495,7 @@ func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) 
 func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	req.timeout = time.Until(deadline)
 	if req.timeout <= 0 {
+		clearStatusOnFailedRequest(resp)
 		return ErrTimeout
 	}
 	return c.Do(req, resp)
@@ -546,32 +548,49 @@ func (c *Client) DoRedirects(req *Request, resp *Response, maxRedirectsCount int
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *Client) Do(req *Request, resp *Response) error {
-	uri := req.URI()
-	if uri == nil {
-		return ErrorInvalidURI
-	}
-
-	host := uri.Host()
-
-	if bytes.ContainsRune(host, ',') {
-		return fmt.Errorf("invalid host %q: use a host client for multiple hosts", host)
-	}
-
-	isTLS := false
-	if uri.isHTTPS() {
-		isTLS = true
-	} else if !uri.isHTTP() {
-		return fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme())
-	}
-
-	hc, err := c.hostClient(host, isTLS)
+	hc, err := c.hostClientForRequest(req)
 	if err != nil {
+		// The request failed before a response could be read, so a reused
+		// response must not report the status code of an earlier request.
+		clearStatusOnFailedRequest(resp)
 		return err
 	}
 
 	atomic.AddInt32(&hc.pendingClientRequests, 1)
 	defer atomic.AddInt32(&hc.pendingClientRequests, -1)
 	return hc.Do(req, resp)
+}
+
+// hostClientForRequest validates req's URI and returns the HostClient serving it.
+func (c *Client) hostClientForRequest(req *Request) (*HostClient, error) {
+	uri := req.URI()
+	if uri == nil {
+		return nil, ErrorInvalidURI
+	}
+
+	host := uri.Host()
+
+	if bytes.ContainsRune(host, ',') {
+		return nil, fmt.Errorf("invalid host %q: use a host client for multiple hosts", host)
+	}
+
+	isTLS := false
+	if uri.isHTTPS() {
+		isTLS = true
+	} else if !uri.isHTTP() {
+		return nil, fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme())
+	}
+
+	return c.hostClient(host, isTLS)
+}
+
+// clearStatusOnFailedRequest clears the status code of a reused response for a
+// request that returns an error without having read a response, keeping the
+// response options such as SkipBody and StreamBody that the caller has set.
+func clearStatusOnFailedRequest(resp *Response) {
+	if resp != nil {
+		resp.Header.resetStatus()
+	}
 }
 
 func (c *Client) hostClient(host []byte, isTLS bool) (*HostClient, error) {
@@ -1337,6 +1356,7 @@ func doRequestFollowRedirects(
 
 	for {
 		if err := req.parseURI(); err != nil {
+			clearStatusOnFailedRequest(resp)
 			return 0, nil, err
 		}
 
@@ -1644,6 +1664,7 @@ func ReleaseResponse(resp *Response) {
 func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	req.timeout = timeout
 	if req.timeout <= 0 {
+		clearStatusOnFailedRequest(resp)
 		return ErrTimeout
 	}
 	return c.Do(req, resp)
@@ -1671,6 +1692,7 @@ func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Durati
 func (c *HostClient) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	req.timeout = time.Until(deadline)
 	if req.timeout <= 0 {
+		clearStatusOnFailedRequest(resp)
 		return ErrTimeout
 	}
 	return c.Do(req, resp)
@@ -1750,6 +1772,7 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		if timeout > 0 {
 			req.timeout = time.Until(deadline)
 			if req.timeout <= 0 {
+				clearStatusOnFailedRequest(resp)
 				err = ErrTimeout
 				break
 			}
@@ -1847,6 +1870,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	req.Header.secureErrorLogMessage = c.SecureErrorLogMessage
 
 	if c.IsTLS != req.URI().isHTTPS() {
+		resp.Header.resetStatus()
 		return false, ErrHostClientRedirectToDifferentScheme
 	}
 
@@ -1864,6 +1888,11 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	customStreamBody := !req.forceResponseBodyBuffering && (resp.StreamBody || c.StreamResponseBody)
 	customNoDefaultContentType := resp.Header.noDefaultContentType
 	resp.Reset()
+	// Reset restores the StatusOK default of a response served by Server, but
+	// no response has been read for this attempt yet. Clear it, so a reverse
+	// proxy handler that passed ctx.Response to the client does not report a
+	// successful status code when the attempt fails before a response arrives.
+	resp.Header.resetStatus()
 	resp.SkipBody = customSkipBody
 	resp.StreamBody = customStreamBody
 	resp.Header.noDefaultContentType = customNoDefaultContentType
@@ -1881,7 +1910,11 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		}
 	}
 
-	return c.transport().RoundTrip(c, req, resp)
+	retry, err := c.transport().RoundTrip(c, req, resp)
+	if err == nil && resp.Header.StatusCode() == 0 {
+		resp.Header.SetStatusCode(StatusOK)
+	}
+	return retry, err
 }
 
 func (c *HostClient) transport() RoundTripper {
@@ -2958,6 +2991,13 @@ func (c *PipelineClient) DoDeadline(req *Request, resp *Response, deadline time.
 }
 
 func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
+	// Every path that returns before a response is copied into resp, including
+	// an expired deadline, a TLS config error and the timeout while the request
+	// is queued or waiting for a reply, must not report the status code of an
+	// earlier request on a reused response. Clear it here, once, and let the
+	// response copy below set the status code of this request.
+	clearStatusOnFailedRequest(resp)
+
 	timeout := time.Until(deadline)
 	if timeout <= 0 {
 		return ErrTimeout
@@ -3037,6 +3077,7 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 	var err error
 	select {
 	case <-w.done:
+		err = w.err
 		if resp != nil {
 			if resp.KeepBodyBuffer && resp.body != nil {
 				w.respCopy.copyToSkipBody(resp)
@@ -3049,8 +3090,13 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 				swapResponseBody(resp, &w.respCopy)
 			}
 			resp.StreamBody = streamBody
+			// copyToSkipBody resets resp, which restores StatusOK for a server
+			// response. Preserve the worker's unset status on error (0 if no
+			// status line was read, or the parsed status if only the body failed).
+			if err != nil && w.respCopy.Header.StatusCode() == 0 {
+				resp.Header.resetStatus()
+			}
 		}
-		err = w.err
 		c.releasePipelineWork(w)
 	case <-w.t.C:
 		err = ErrTimeout
@@ -3113,6 +3159,11 @@ func (c *PipelineClient) Do(req *Request, resp *Response) error {
 }
 
 func (c *pipelineConnClient) Do(req *Request, resp *Response) error {
+	// The response is filled in by the worker goroutine only after the request
+	// is queued, so every early return below leaves a reused response at the
+	// status code cleared here instead of the one of an earlier request.
+	clearStatusOnFailedRequest(resp)
+
 	if err := c.ensureTLSConfig(); err != nil {
 		return err
 	}

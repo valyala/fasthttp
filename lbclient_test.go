@@ -43,9 +43,22 @@ func TestLBClientRemoveAllClients(t *testing.T) {
 	}
 
 	// get() must not panic and must release the RLock, so the request fails
-	// cleanly with ErrNoAvailableClients instead.
+	// cleanly with ErrNoAvailableClients instead. The failed request must not
+	// leave the status code of an earlier response behind.
+	resp.Header.SetStatusCode(StatusCreated)
 	if err := lbc.DoDeadline(&req, &resp, deadline()); !errors.Is(err, ErrNoAvailableClients) {
 		t.Fatalf("unexpected error: %v. Expecting %v", err, ErrNoAvailableClients)
+	}
+	if statusCode := resp.StatusCode(); statusCode != 0 {
+		t.Fatalf("unexpected status code after DoDeadline: %d. Expecting 0", statusCode)
+	}
+
+	resp.Header.SetStatusCode(StatusCreated)
+	if err := lbc.DoTimeout(&req, &resp, time.Second); !errors.Is(err, ErrNoAvailableClients) {
+		t.Fatalf("unexpected error: %v. Expecting %v", err, ErrNoAvailableClients)
+	}
+	if statusCode := resp.StatusCode(); statusCode != 0 {
+		t.Fatalf("unexpected status code after DoTimeout: %d. Expecting 0", statusCode)
 	}
 
 	// With the bug the leaked RLock makes AddClient block forever.

@@ -3397,6 +3397,13 @@ func (s *Server) acquireCtx(c net.Conn) (ctx *RequestCtx) {
 		ctx.formValueFunc = s.FormValueFunc
 	}
 	ctx.c = c
+	// A response always carries a status code, and middleware wrapping the
+	// handler expects to read the one the client receives. Set the default here
+	// so every context handed to ErrorHandler, ExpectHandler, or Handler starts
+	// with StatusOK, including a fresh one acquired by acquireByteReader after
+	// GC clears ctxPool under ReduceMemoryUsage. Response.Reset keeps the
+	// default for server responses across keep-alive requests.
+	ctx.Response.Header.setServerDefaultStatus()
 
 	return ctx
 }
@@ -3423,6 +3430,13 @@ func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger, reduceMemoryUsage boo
 	ctx.Response.keepBodyBuffer = keepBodyBuffer
 	ctx.Request.KeepBodyBuffer = false
 	ctx.Response.KeepBodyBuffer = false
+
+	// A response always carries a status code, and middleware wrapping the
+	// handler expects to read the one the client receives. Set the default here
+	// as well, since custom servers prepare a context with this method instead
+	// of going through the request loop in Server. Response.Reset keeps the
+	// default for server responses.
+	ctx.Response.Header.setServerDefaultStatus()
 }
 
 // Init prepares ctx for passing to RequestHandler.
