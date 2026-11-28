@@ -42,7 +42,12 @@ type header struct {
 	secureErrorLogMessage bool
 	noHTTP11              bool
 	connectionClose       bool
-	noDefaultContentType  bool
+	// canonicalClose records a close whose authority is the canonical
+	// Connection option or an explicit SetConnectionClose call, as opposed to
+	// a differently cased field or HTTP/1.0 default framing. A delete of an
+	// unrelated spelling must not drop that decision.
+	canonicalClose       bool
+	noDefaultContentType bool
 
 	// written is set while a streamed body is written: the header block is
 	// out, so announcing a name then no longer moves its values.
@@ -200,12 +205,14 @@ func (h *header) ConnectionClose() bool {
 // SetConnectionClose sets 'Connection: close' header.
 func (h *header) SetConnectionClose() {
 	h.connectionClose = true
+	h.canonicalClose = true
 }
 
 // ResetConnectionClose clears 'Connection: close' header if it exists.
 func (h *header) ResetConnectionClose() {
 	if h.connectionClose {
 		h.connectionClose = false
+		h.canonicalClose = false
 		for i := 0; i < len(h.h); i++ {
 			if caseInsensitiveCompare(h.h[i].key, strConnection) {
 				val := removeHeaderValue(nil, h.h[i].value, strClose)
@@ -1552,6 +1559,7 @@ func (h *ResponseHeader) Reset() {
 func (h *ResponseHeader) resetSkipNormalize() {
 	h.noHTTP11 = false
 	h.connectionClose = false
+	h.canonicalClose = false
 
 	h.statusCode = 0
 	h.statusMessage = h.statusMessage[:0]
@@ -1584,6 +1592,7 @@ func (h *RequestHeader) Reset() {
 func (h *RequestHeader) resetSkipNormalize() {
 	h.noHTTP11 = false
 	h.connectionClose = false
+	h.canonicalClose = false
 
 	h.contentLength = 0
 	h.contentLengthBytes = h.contentLengthBytes[:0]
@@ -1611,6 +1620,7 @@ func (h *header) copyTo(dst *header) {
 	dst.disableNormalizing = h.disableNormalizing
 	dst.noHTTP11 = h.noHTTP11
 	dst.connectionClose = h.connectionClose
+	dst.canonicalClose = h.canonicalClose
 	dst.noDefaultContentType = h.noDefaultContentType
 	dst.contentLength = h.contentLength
 	dst.contentLengthBytes = append(dst.contentLengthBytes, h.contentLengthBytes...)
@@ -2018,8 +2028,6 @@ func (h *RequestHeader) del(key []byte) {
 	case HeaderContentLength:
 		h.contentLength = 0
 		h.contentLengthBytes = h.contentLengthBytes[:0]
-	case HeaderConnection:
-		h.connectionClose = false
 	case HeaderTrailer:
 		if d := h.dedicatedUserAgent(); d.value != nil {
 			h.restoreTrailer(d)
@@ -2028,6 +2036,49 @@ func (h *RequestHeader) del(key []byte) {
 		// keeps the values after it, and those returning, in order.
 		h.h = delAllArgsStable(h.h, HeaderTrailer)
 		h.unannounceTrailers()
+	}
+	// With DisableNormalizing the key can be lowercase, so the switch above
+	// does not see HeaderConnection. delAllArgs matches keys exactly, so
+	// deleting one spelling can leave a differently cased Connection field
+	// behind. With the default settings the close was consumed into the flag
+	// and no field was stored at all.
+	if caseInsensitiveCompare(strConnection, key) {
+		// Track what the delete actually removes. Deleting a spelling that is
+		// not present, or one that only held keep-alive, must not change a
+		// close stored elsewhere.
+		deletedClose := false
+		for i := range h.h {
+			if bytes.Equal(h.h[i].key, key) &&
+				hasHeaderValue(h.h[i].value, strClose) {
+				deletedClose = true
+			}
+		}
+		canonicalDelete := bytes.Equal(key, strConnection)
+		h.h = delAllArgs(h.h, b2s(key))
+		h.trailerH = delAllArgs(h.trailerH, b2s(key))
+		if canonicalDelete {
+			// Deleting the canonical spelling drops the separately stored
+			// close even when it was consumed during parsing and no field
+			// was present for it.
+			h.canonicalClose = false
+		}
+		closeField := hasConnectionCloseValue(h.h) || hasConnectionCloseValue(h.trailerH)
+		noHTTP11Close := h.noHTTP11 && !hasConnectionKeepAliveValue(h.h) &&
+			!hasConnectionKeepAliveValue(h.trailerH)
+		switch {
+		case closeField || noHTTP11Close:
+			// A surviving close field, or the HTTP/1.0 default with the last
+			// keep-alive gone.
+			h.connectionClose = true
+		case h.canonicalClose && !canonicalDelete:
+			// The canonical close is stored separately; a different spelling
+			// is unrelated to it.
+			h.connectionClose = true
+		case deletedClose || canonicalDelete:
+			h.connectionClose = false
+		}
+		// Anything else is a no-op delete: leave the flag untouched.
+		return
 	}
 	h.h = delAllArgs(h.h, b2s(key))
 	h.trailerH = delAllArgs(h.trailerH, b2s(key))
@@ -2061,6 +2112,9 @@ func (h *ResponseHeader) setSpecialHeader(key, value []byte, add bool) bool {
 		case caseInsensitiveCompare(strConnection, key):
 			if hasHeaderValue(value, strClose) {
 				h.connectionClose = true
+				if bytes.Equal(key, strConnection) {
+					h.canonicalClose = true
+				}
 				if hasOtherHeaderValue(value, strClose) {
 					h.setNonSpecial(key, value)
 				} else {
@@ -2158,6 +2212,9 @@ func (h *RequestHeader) setSpecialHeader(key, value []byte, add bool) bool {
 		case caseInsensitiveCompare(strConnection, key):
 			if hasHeaderValue(value, strClose) {
 				h.connectionClose = true
+				if bytes.Equal(key, strConnection) {
+					h.canonicalClose = true
+				}
 				if hasOtherHeaderValue(value, strClose) {
 					h.setNonSpecial(key, value)
 				} else {
@@ -2504,6 +2561,16 @@ func (h *RequestHeader) AddBytesKV(key, value []byte) {
 	}
 
 	h.appendNonSpecial(h.bufK, h.bufV)
+	// With special processing off, setSpecialHeader does not see the
+	// Connection field, so an appended close would leave the flag stale and
+	// HostClient could pool a connection the peer asked to close.
+	if h.disableSpecialHeader && caseInsensitiveCompare(key, strConnection) &&
+		hasHeaderValue(value, strClose) {
+		h.connectionClose = true
+		if bytes.Equal(key, strConnection) {
+			h.canonicalClose = true
+		}
+	}
 }
 
 // Set sets the given 'key: value' header.
@@ -2573,10 +2640,32 @@ func (h *RequestHeader) SetBytesKV(key, value []byte) {
 // it will be sent after the chunked request body.
 func (h *RequestHeader) SetCanonical(key, value []byte) {
 	h.bufV = initHeaderValueBytes(h.bufV, value)
+	connection := h.disableSpecialHeader && caseInsensitiveCompare(key, strConnection)
 	if h.setSpecialHeader(key, h.bufV, false) {
 		return
 	}
 	h.setNonSpecial(key, h.bufV)
+	if connection {
+		// setNonSpecial replaces only the field with this exact key. With
+		// normalization off a differently cased close field can still be on
+		// the wire. An HTTP/1.0 request with no keep-alive closes by default,
+		// even though that close is not stored as a field, so keep that too.
+		closeField := hasConnectionCloseValue(h.h) || hasConnectionCloseValue(h.trailerH)
+		noHTTP11Close := h.noHTTP11 && !hasConnectionKeepAliveValue(h.h) &&
+			!hasConnectionKeepAliveValue(h.trailerH)
+		// A close set through SetConnectionClose is not tied to any field, so
+		// replacing a differently spelled Connection value must not drop it.
+		if h.canonicalClose && !bytes.Equal(key, strConnection) {
+			h.connectionClose = true
+		} else {
+			h.connectionClose = closeField || noHTTP11Close
+		}
+		if bytes.Equal(key, strConnection) {
+			// Replacing the canonical close with a non-close value removes
+			// the stored decision; a different spelling cannot do that.
+			h.canonicalClose = hasHeaderValue(h.bufV, strClose)
+		}
+	}
 }
 
 // Peek returns header value for the given key.
@@ -3999,8 +4088,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	}
 	if h.noHTTP11 && !h.connectionClose {
 		// close connection for non-http/1.1 response unless 'Connection: keep-alive' is set.
-		v := peekArgBytes(h.h, strConnection)
-		h.connectionClose = !hasHeaderValue(v, strKeepAlive)
+		h.connectionClose = !hasConnectionKeepAliveValue(h.h)
 	}
 
 	return s.r, nil
@@ -4082,6 +4170,15 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 		}
 
 		if h.disableSpecialHeader {
+			// Special header processing is disabled, but an explicit close
+			// must still take precedence over a later keep-alive, the same
+			// way it does when special headers are processed.
+			if caseInsensitiveCompare(s.key, strConnection) && hasHeaderValue(s.value, strClose) {
+				h.connectionClose = true
+				if bytes.Equal(s.key, strConnection) {
+					h.canonicalClose = true
+				}
+			}
 			h.h = appendArgNormalized(h.h, s.key, s.value, disableNormalizing)
 			continue
 		}
@@ -4126,6 +4223,9 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 			if caseInsensitiveCompare(s.key, strConnection) {
 				if hasHeaderValue(s.value, strClose) {
 					h.connectionClose = true
+					if bytes.Equal(s.key, strConnection) {
+						h.canonicalClose = true
+					}
 					if hasOtherHeaderValue(s.value, strClose) {
 						h.h = appendArgNormalized(h.h, s.key, s.value, disableNormalizing)
 					}
@@ -4182,8 +4282,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 	}
 	if h.noHTTP11 && !h.connectionClose {
 		// close connection for non-http/1.1 request unless 'Connection: keep-alive' is set.
-		v := peekArgBytes(h.h, strConnection)
-		h.connectionClose = !hasHeaderValue(v, strKeepAlive)
+		h.connectionClose = !hasConnectionKeepAliveValue(h.h)
 	}
 	return s.r, s.rawSaved, nil
 }
@@ -4276,6 +4375,20 @@ func hasConnectionCloseValue(h []argsKV) bool {
 	for i := range h {
 		if caseInsensitiveCompare(h[i].key, strConnection) {
 			if hasHeaderValue(h[i].value, strClose) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasConnectionKeepAliveValue reports whether any of the Connection headers
+// holds the keep-alive option. A header may be repeated, and the option may
+// be one of several in the list.
+func hasConnectionKeepAliveValue(h []argsKV) bool {
+	for i := range h {
+		if caseInsensitiveCompare(h[i].key, strConnection) {
+			if hasHeaderValue(h[i].value, strKeepAlive) {
 				return true
 			}
 		}

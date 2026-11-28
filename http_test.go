@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
@@ -786,6 +787,87 @@ func TestRequestBufferedBodyWithTrailerNoFlush(t *testing.T) {
 	}
 	if bw.Buffered() == 0 {
 		t.Fatal("expected the request to be buffered")
+	}
+}
+
+func TestResponseHTTP10UpgradeKeepAliveEOFDelimitedBody(t *testing.T) {
+	t.Parallel()
+
+	// The keep-alive option is in the second Connection header and there is no
+	// Content-Length, so the body is delimited by EOF. The connection is
+	// already closed at that point and cannot be pooled, even if the peer
+	// sent keep-alive.
+	raw := "HTTP/1.0 200 OK\r\n" +
+		"Connection: upgrade\r\n" +
+		"Connection: keep-alive\r\n" +
+		"\r\n" +
+		"body"
+	var resp Response
+	if err := resp.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resp.ConnectionClose() {
+		t.Fatal("expected ConnectionClose for a body delimited by EOF")
+	}
+
+	// The same headers with a Content-Length delimit the body exactly, so the
+	// keep-alive is honored and the connection stays open.
+	rawCL := "HTTP/1.0 200 OK\r\n" +
+		"Connection: upgrade\r\n" +
+		"Connection: keep-alive\r\n" +
+		"Content-Length: 4\r\n" +
+		"\r\n" +
+		"body"
+	var respCL Response
+	if err := respCL.Read(bufio.NewReader(strings.NewReader(rawCL))); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if respCL.ConnectionClose() {
+		t.Fatal("unexpected ConnectionClose when Content-Length delimits the body")
+	}
+}
+
+func TestResponseHTTP10UpgradeKeepAliveEOFDelimitedStreamedBody(t *testing.T) {
+	t.Parallel()
+
+	// With StreamResponseBody the body is exposed before ReadBody reaches the
+	// buffered path. The EOF-delimited response still has to close the
+	// connection, otherwise HostClient pools a connection the peer closed.
+	clientConn, serverConn := net.Pipe()
+	go func() {
+		defer serverConn.Close()
+		buf := make([]byte, 4096)
+		_, _ = serverConn.Read(buf) // request line and headers
+		_, _ = serverConn.Write([]byte("HTTP/1.0 200 OK\r\n" +
+			"Connection: upgrade\r\n" +
+			"Connection: keep-alive\r\n" +
+			"\r\n" +
+			"body"))
+	}()
+
+	hc := &HostClient{
+		Addr:               "example.com:80",
+		Dial:               func(string) (net.Conn, error) { return clientConn, nil },
+		StreamResponseBody: true,
+	}
+	var req Request
+	req.SetRequestURI("http://example.com/")
+	resp := AcquireResponse()
+	defer ReleaseResponse(resp)
+	if err := hc.Do(&req, resp); err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	if !resp.ConnectionClose() {
+		t.Fatal("expected ConnectionClose for an EOF delimited streamed body")
+	}
+	if _, err := io.Copy(io.Discard, resp.BodyStream()); err != nil {
+		t.Fatalf("unexpected stream read error: %v", err)
+	}
+	if err := resp.CloseBodyStream(); err != nil {
+		t.Fatalf("unexpected stream close error: %v", err)
+	}
+	if n := hc.IdleConnsCount(); n != 0 {
+		t.Fatalf("closed connection was pooled: %d idle connections", n)
 	}
 }
 
@@ -6585,4 +6667,118 @@ func TestRequestBodyStreamWarning(t *testing.T) {
 	if out != expectedWarning {
 		t.Fatalf("unexpected log message: got %q, want %q", out, expectedWarning)
 	}
+}
+
+func TestResponseReadSkipBodyHeadHTTP11KeepsConnection(t *testing.T) {
+	t.Parallel()
+
+	// Response.Read always passes head=false, so a HEAD response read with
+	// SkipBody must not be mistaken for an EOF-delimited body.
+	reader := bufio.NewReader(strings.NewReader(
+		"HTTP/1.1 200 OK\r\nConnection: Upgrade\r\n\r\n" +
+			"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"))
+	var resp Response
+	resp.SkipBody = true
+	if err := resp.Read(reader); err != nil {
+		t.Fatalf("first Read: %v", err)
+	}
+	if resp.ConnectionClose() {
+		t.Fatal("HEAD response with SkipBody was marked closed")
+	}
+	var next Response
+	if err := next.Read(reader); err != nil {
+		t.Fatalf("second Read on the same connection: %v", err)
+	}
+	if next.StatusCode() != StatusOK {
+		t.Fatalf("second status = %d, want 200", next.StatusCode())
+	}
+}
+
+func TestResponseReadSkipBodyHeadHTTP10KeepAliveStaysOpen(t *testing.T) {
+	t.Parallel()
+
+	reader := bufio.NewReader(strings.NewReader(
+		"HTTP/1.0 200 OK\r\nConnection: keep-alive, Upgrade\r\n\r\n" +
+			"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"))
+	var resp Response
+	resp.SkipBody = true
+	if err := resp.Read(reader); err != nil {
+		t.Fatalf("first Read: %v", err)
+	}
+	if resp.ConnectionClose() {
+		t.Fatal("HTTP/1.0 HEAD with keep-alive was marked closed")
+	}
+	var next Response
+	if err := next.Read(reader); err != nil {
+		t.Fatalf("second Read on the same connection: %v", err)
+	}
+	if next.StatusCode() != StatusOK {
+		t.Fatalf("second status = %d, want 200", next.StatusCode())
+	}
+}
+
+func TestResponseHTTP10UpgradeKeepAliveEOFDelimitedSkippedBody(t *testing.T) {
+	t.Parallel()
+
+	// A caller that sets SkipBody on a GET never reads the EOF-delimited body.
+	// The peer has closed, so HostClient must discard the connection instead of
+	// pooling it. A HEAD response carries no body, so it may still be reused.
+	run := func(method string, wantIdle int, wantClose bool) {
+		clientConn, serverConn := net.Pipe()
+		go func() {
+			defer serverConn.Close()
+			buf := make([]byte, 4096)
+			_, _ = serverConn.Read(buf) // request line and headers
+			body := ""
+			if method == MethodGet {
+				body = "body" // a GET with SkipBody leaves the body unread
+			}
+			_, _ = serverConn.Write([]byte("HTTP/1.0 200 OK\r\n" +
+				"Connection: upgrade\r\n" +
+				"Connection: keep-alive\r\n" +
+				"\r\n" + body))
+			if method == MethodHead {
+				// A HEAD response carries no body, so prove the pooled
+				// connection is usable by serving a second request on it.
+				if _, err := serverConn.Read(buf); err != nil {
+					t.Errorf("HEAD: pooled connection was not reused: %v", err)
+					return
+				}
+				_, _ = serverConn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"))
+			}
+		}()
+
+		hc := &HostClient{
+			Addr: "example.com:80",
+			Dial: func(string) (net.Conn, error) { return clientConn, nil },
+		}
+		var req Request
+		req.SetRequestURI("http://example.com/")
+		req.Header.SetMethod(method)
+		resp := AcquireResponse()
+		defer ReleaseResponse(resp)
+		resp.SkipBody = true
+		if err := hc.Do(&req, resp); err != nil {
+			t.Fatalf("%s: unexpected request error: %v", method, err)
+		}
+		if n := hc.IdleConnsCount(); n != wantIdle {
+			t.Fatalf("%s: %d idle connections, want %d", method, n, wantIdle)
+		}
+		if got := resp.ConnectionClose(); got != wantClose {
+			t.Fatalf("%s: ConnectionClose = %v, want %v", method, got, wantClose)
+		}
+		if method == MethodHead {
+			var req2 Request
+			req2.SetRequestURI("http://example.com/")
+			var resp2 Response
+			if err := hc.Do(&req2, &resp2); err != nil {
+				t.Fatalf("HEAD: second request on the pooled connection failed: %v", err)
+			}
+		}
+		hc.CloseIdleConnections()
+		clientConn.Close()
+	}
+
+	run(MethodGet, 0, true)
+	run(MethodHead, 1, false)
 }
