@@ -1968,8 +1968,9 @@ func (resp *Response) readLimitBody(r *bufio.Reader, maxBodySize int, head, conn
 	// PipelineClient as well as HostClient. HEAD, a successful CONNECT and
 	// status codes without a body are excluded here, since they end at the
 	// header and may keep the connection.
-	if resp.SkipBody && !resp.headResponse && !resp.isConnectTunnel() &&
-		!resp.Header.mustSkipContentLength() && resp.Header.ContentLength() == -2 {
+	if resp.SkipBody && resp.Header.noHTTP11 && !resp.headResponse &&
+		!resp.isConnectTunnel() && !resp.Header.mustSkipContentLength() &&
+		resp.Header.ContentLength() == -2 {
 		resp.Header.SetConnectionClose()
 	}
 	if !resp.mustSkipBody() {

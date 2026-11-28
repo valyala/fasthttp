@@ -6669,6 +6669,31 @@ func TestRequestBodyStreamWarning(t *testing.T) {
 	}
 }
 
+func TestResponseReadSkipBodyHeadHTTP11KeepsConnection(t *testing.T) {
+	t.Parallel()
+
+	// Response.Read always passes head=false, so a HEAD response read with
+	// SkipBody must not be mistaken for an EOF-delimited body.
+	reader := bufio.NewReader(strings.NewReader(
+		"HTTP/1.1 200 OK\r\nConnection: Upgrade\r\n\r\n" +
+			"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"))
+	var resp Response
+	resp.SkipBody = true
+	if err := resp.Read(reader); err != nil {
+		t.Fatalf("first Read: %v", err)
+	}
+	if resp.ConnectionClose() {
+		t.Fatal("HEAD response with SkipBody was marked closed")
+	}
+	var next Response
+	if err := next.Read(reader); err != nil {
+		t.Fatalf("second Read on the same connection: %v", err)
+	}
+	if next.StatusCode() != StatusOK {
+		t.Fatalf("second status = %d, want 200", next.StatusCode())
+	}
+}
+
 func TestResponseReadEOFDelimitedSkipBodySetsClose(t *testing.T) {
 	t.Parallel()
 

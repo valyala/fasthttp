@@ -2008,16 +2008,15 @@ func (h *RequestHeader) del(key []byte) {
 	// behind. With the default settings the close was consumed into the flag
 	// and no field was stored at all.
 	if caseInsensitiveCompare(strConnection, key) {
-		// A close stored under the canonical spelling belongs to that field.
-		// Deleting the field drops the provenance even if another close
-		// field is still on the wire.
-		canonicalField := false
-		if bytes.Equal(key, strConnection) {
-			for i := range h.h {
-				if bytes.Equal(h.h[i].key, strConnection) &&
-					hasHeaderValue(h.h[i].value, strClose) {
+		// Track which fields the delete actually removes: deleting a spelling
+		// that is not present must not change a parsed close.
+		matched, canonicalField := false, false
+		for i := range h.h {
+			if bytes.Equal(h.h[i].key, key) {
+				matched = true
+				if hasHeaderValue(h.h[i].value, strClose) &&
+					bytes.Equal(key, strConnection) {
 					canonicalField = true
-					break
 				}
 			}
 		}
@@ -2035,12 +2034,19 @@ func (h *RequestHeader) del(key []byte) {
 			// keep-alive gone.
 			h.connectionClose = true
 		case h.canonicalClose && !bytes.Equal(key, strConnection):
-			// The canonical close was consumed into the flag; deleting a
-			// different spelling does not remove it.
+			// The canonical close is stored separately; a different spelling
+			// is unrelated to it.
 			h.connectionClose = true
-		default:
+		case h.canonicalClose:
+			// Deleting the canonical spelling removes the separately stored
+			// close, even when no field was present for it.
+			h.canonicalClose = false
+			h.connectionClose = false
+		case matched:
+			// The close came from the field that was deleted.
 			h.connectionClose = false
 		}
+		// A no-op delete of an absent spelling leaves the flag untouched.
 		return
 	}
 	h.h = delAllArgs(h.h, b2s(key))
@@ -2620,8 +2626,10 @@ func (h *RequestHeader) SetCanonical(key, value []byte) {
 		} else {
 			h.connectionClose = closeField || noHTTP11Close
 		}
-		if bytes.Equal(key, strConnection) && hasHeaderValue(h.bufV, strClose) {
-			h.canonicalClose = true
+		if bytes.Equal(key, strConnection) {
+			// Replacing the canonical close with a non-close value removes
+			// the stored decision; a different spelling cannot do that.
+			h.canonicalClose = hasHeaderValue(h.bufV, strClose)
 		}
 	}
 }

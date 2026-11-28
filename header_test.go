@@ -820,7 +820,7 @@ func TestRequestDelConnectionRecomputesCloseFlag(t *testing.T) {
 				t.Fatalf("ConnectionClose before delete = %v, want %v", got, tc.initialClose)
 			}
 
-			for _, key := range strings.Split(tc.delKey, "|") {
+			for key := range strings.SplitSeq(tc.delKey, "|") {
 				h.Del(key)
 			}
 			if got := h.ConnectionClose(); got != tc.wantClose {
@@ -844,7 +844,7 @@ func TestRequestDelConnectionRecomputesCloseFlag(t *testing.T) {
 			if err := req.Header.Read(bufio.NewReader(strings.NewReader(tc.wire))); err != nil {
 				t.Fatalf("unexpected request header read error: %v", err)
 			}
-			for _, key := range strings.Split(tc.delKey, "|") {
+			for key := range strings.SplitSeq(tc.delKey, "|") {
 				req.Header.Del(key)
 			}
 			var resp Response
@@ -990,6 +990,90 @@ func TestRequestHeaderDisableSpecialHeaderAddClose(t *testing.T) {
 	}
 	if n := hc.IdleConnsCount(); n != 0 {
 		t.Fatalf("idle connections = %d, want 0 after adding close", n)
+	}
+}
+
+func TestRequestHeaderDelAbsentSpellingKeepsParsedClose(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	h.DisableNormalizing()
+	if err := h.Read(bufio.NewReader(strings.NewReader(
+		"GET / HTTP/1.1\r\nHost: example.com\r\nconnection: close\r\n\r\n"))); err != nil {
+		t.Fatalf("unexpected header read error: %v", err)
+	}
+	if !h.ConnectionClose() {
+		t.Fatal("expected the parsed close")
+	}
+	h.Del("CONNECTION")
+	if !h.ConnectionClose() {
+		t.Fatal("deleting an absent spelling cleared the parsed close")
+	}
+	if !strings.Contains(string(h.Header()), "Connection: close") {
+		t.Fatalf("close missing from the wire: %q", string(h.Header()))
+	}
+
+	clientConn, serverConn := net.Pipe()
+	go serveReusableResponse(serverConn)
+	hc := &HostClient{
+		Addr: "example.com:80",
+		Dial: func(string) (net.Conn, error) { return clientConn, nil },
+	}
+	var req Request
+	req.SetRequestURI("http://example.com/")
+	req.Header.DisableNormalizing()
+	if err := req.Header.Read(bufio.NewReader(strings.NewReader(
+		"GET / HTTP/1.1\r\nHost: example.com\r\nconnection: close\r\n\r\n"))); err != nil {
+		t.Fatalf("unexpected request header read error: %v", err)
+	}
+	req.Header.Del("CONNECTION")
+	var resp Response
+	if err := hc.Do(&req, &resp); err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	if n := hc.IdleConnsCount(); n != 0 {
+		t.Fatalf("idle connections = %d, want 0", n)
+	}
+}
+
+func TestRequestHeaderExplicitCloseClearedByCanonicalDeleteAndReplace(t *testing.T) {
+	t.Parallel()
+
+	// SetConnectionClose then two deletes: the first removes the stored
+	// close, the second must not bring it back.
+	var h RequestHeader
+	h.DisableNormalizing()
+	if err := h.Read(bufio.NewReader(strings.NewReader(
+		"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"))); err != nil {
+		t.Fatal(err)
+	}
+	h.SetConnectionClose()
+	h.Del("Connection")
+	h.Del("connection")
+	if h.ConnectionClose() {
+		t.Fatal("stored close came back after deleting both spellings")
+	}
+	if strings.Contains(string(h.Header()), "Connection: close") {
+		t.Fatalf("close returned to the wire: %q", string(h.Header()))
+	}
+
+	// Replacing the canonical close field clears the stored decision, so a
+	// later edit of a different spelling cannot resurrect it.
+	var r RequestHeader
+	r.DisableSpecialHeader()
+	r.DisableNormalizing()
+	if err := r.Read(bufio.NewReader(strings.NewReader(
+		"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"))); err != nil {
+		t.Fatal(err)
+	}
+	r.Set("Connection", "close")
+	r.Set("Connection", "keep-alive")
+	r.Set("connection", "upgrade")
+	if r.ConnectionClose() {
+		t.Fatal("replaced close survived under a different spelling")
+	}
+	if wire := string(r.Header()); strings.Contains(wire, "Connection: close") {
+		t.Fatalf("close returned to the wire: %q", wire)
 	}
 }
 
