@@ -6694,27 +6694,26 @@ func TestResponseReadSkipBodyHeadHTTP11KeepsConnection(t *testing.T) {
 	}
 }
 
-func TestResponseReadEOFDelimitedSkipBodySetsClose(t *testing.T) {
+func TestResponseReadSkipBodyHeadHTTP10KeepAliveStaysOpen(t *testing.T) {
 	t.Parallel()
 
-	wire := "HTTP/1.0 200 OK\r\nConnection: upgrade\r\nConnection: keep-alive\r\n\r\nbody"
-	read := func(head, connect bool) bool {
-		var resp Response
-		resp.SkipBody = true
-		br := bufio.NewReader(strings.NewReader(wire))
-		if err := resp.readLimitBody(br, 0, head, connect); err != nil {
-			t.Fatalf("readLimitBody: %v", err)
-		}
-		return resp.ConnectionClose()
+	reader := bufio.NewReader(strings.NewReader(
+		"HTTP/1.0 200 OK\r\nConnection: keep-alive, Upgrade\r\n\r\n" +
+			"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"))
+	var resp Response
+	resp.SkipBody = true
+	if err := resp.Read(reader); err != nil {
+		t.Fatalf("first Read: %v", err)
 	}
-	if !read(false, false) {
-		t.Fatal("Response.Read with SkipBody did not mark an EOF-delimited body closed")
+	if resp.ConnectionClose() {
+		t.Fatal("HTTP/1.0 HEAD with keep-alive was marked closed")
 	}
-	if read(true, false) {
-		t.Fatal("a HEAD response must stay reusable")
+	var next Response
+	if err := next.Read(reader); err != nil {
+		t.Fatalf("second Read on the same connection: %v", err)
 	}
-	if read(false, true) {
-		t.Fatal("a successful CONNECT must stay a tunnel, regardless of SkipBody")
+	if next.StatusCode() != StatusOK {
+		t.Fatalf("second status = %d, want 200", next.StatusCode())
 	}
 }
 

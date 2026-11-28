@@ -3807,8 +3807,13 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	if customSkipBody && !isHead && !resp.Header.mustSkipContentLength() && resp.Header.ContentLength() != 0 {
 		// The body of this response was left unread on the connection,
 		// so the next response read from it would start inside that body.
-		// readLimitBody sets ConnectionClose for the EOF-delimited case.
 		closeConn = true
+		if resp.Header.ContentLength() == -2 {
+			// An EOF-delimited body means the peer closed. Only HostClient
+			// knows this was not a HEAD, so mark the close here rather than
+			// in readLimitBody, which public Response.Read also uses.
+			resp.Header.SetConnectionClose()
+		}
 	}
 	if customStreamBody && resp.bodyStream != nil {
 		// releaseConn runs when the caller closes the body stream, so it has to

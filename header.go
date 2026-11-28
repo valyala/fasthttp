@@ -2008,21 +2008,23 @@ func (h *RequestHeader) del(key []byte) {
 	// behind. With the default settings the close was consumed into the flag
 	// and no field was stored at all.
 	if caseInsensitiveCompare(strConnection, key) {
-		// Track which fields the delete actually removes: deleting a spelling
-		// that is not present must not change a parsed close.
-		matched, canonicalField := false, false
+		// Track what the delete actually removes. Deleting a spelling that is
+		// not present, or one that only held keep-alive, must not change a
+		// close stored elsewhere.
+		deletedClose := false
 		for i := range h.h {
-			if bytes.Equal(h.h[i].key, key) {
-				matched = true
-				if hasHeaderValue(h.h[i].value, strClose) &&
-					bytes.Equal(key, strConnection) {
-					canonicalField = true
-				}
+			if bytes.Equal(h.h[i].key, key) &&
+				hasHeaderValue(h.h[i].value, strClose) {
+				deletedClose = true
 			}
 		}
+		canonicalDelete := bytes.Equal(key, strConnection)
 		h.h = delAllArgs(h.h, b2s(key))
 		h.trailerH = delAllArgs(h.trailerH, b2s(key))
-		if canonicalField {
+		if canonicalDelete {
+			// Deleting the canonical spelling drops the separately stored
+			// close even when it was consumed during parsing and no field
+			// was present for it.
 			h.canonicalClose = false
 		}
 		closeField := hasConnectionCloseValue(h.h) || hasConnectionCloseValue(h.trailerH)
@@ -2033,20 +2035,14 @@ func (h *RequestHeader) del(key []byte) {
 			// A surviving close field, or the HTTP/1.0 default with the last
 			// keep-alive gone.
 			h.connectionClose = true
-		case h.canonicalClose && !bytes.Equal(key, strConnection):
+		case h.canonicalClose && !canonicalDelete:
 			// The canonical close is stored separately; a different spelling
 			// is unrelated to it.
 			h.connectionClose = true
-		case h.canonicalClose:
-			// Deleting the canonical spelling removes the separately stored
-			// close, even when no field was present for it.
-			h.canonicalClose = false
-			h.connectionClose = false
-		case matched:
-			// The close came from the field that was deleted.
+		case deletedClose || canonicalDelete:
 			h.connectionClose = false
 		}
-		// A no-op delete of an absent spelling leaves the flag untouched.
+		// Anything else is a no-op delete: leave the flag untouched.
 		return
 	}
 	h.h = delAllArgs(h.h, b2s(key))
@@ -2181,6 +2177,9 @@ func (h *RequestHeader) setSpecialHeader(key, value []byte, add bool) bool {
 		case caseInsensitiveCompare(strConnection, key):
 			if hasHeaderValue(value, strClose) {
 				h.connectionClose = true
+				if bytes.Equal(key, strConnection) {
+					h.canonicalClose = true
+				}
 				if hasOtherHeaderValue(value, strClose) {
 					h.setNonSpecial(key, value)
 				} else {

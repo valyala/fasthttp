@@ -993,6 +993,73 @@ func TestRequestHeaderDisableSpecialHeaderAddClose(t *testing.T) {
 	}
 }
 
+func TestRequestHeaderCanonicalDeleteClearsSetterClose(t *testing.T) {
+	t.Parallel()
+
+	// A bare close consumed by the setter must be tied to the canonical
+	// spelling, whether it came from Set, Add or a parsed lowercase field.
+	make := func(by string) RequestHeader {
+		var h RequestHeader
+		h.Read(bufio.NewReader(strings.NewReader(
+			"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")))
+		switch by {
+		case "set":
+			h.Set("Connection", "close")
+		case "add":
+			h.Add("Connection", "close")
+		case "read":
+			h.DisableNormalizing()
+			h.Read(bufio.NewReader(strings.NewReader(
+				"GET / HTTP/1.1\r\nHost: example.com\r\nconnection: close\r\n\r\n")))
+		}
+		return h
+	}
+	for _, by := range []string{"set", "add", "read"} {
+		h := make(by)
+		if !h.ConnectionClose() {
+			t.Fatalf("%s: expected close before delete", by)
+		}
+		h.Del("Connection")
+		if h.ConnectionClose() {
+			t.Fatalf("%s: canonical delete left the close set", by)
+		}
+	}
+}
+
+func TestRequestHeaderDelKeepAliveOnlyPreservesClose(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	h.DisableNormalizing()
+	if err := h.Read(bufio.NewReader(strings.NewReader(
+		"GET / HTTP/1.1\r\nHost: example.com\r\nconnection: close\r\nCONNECTION: keep-alive\r\n\r\n"))); err != nil {
+		t.Fatal(err)
+	}
+	h.Del("CONNECTION")
+	if !h.ConnectionClose() {
+		t.Fatal("deleting only keep-alive cleared the close")
+	}
+}
+
+func TestRequestHeaderDelCanonicalThenLowercaseWithSpecialHeaders(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	h.DisableNormalizing()
+	if err := h.Read(bufio.NewReader(strings.NewReader(
+		"GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\nconnection: upgrade, close\r\n\r\n"))); err != nil {
+		t.Fatal(err)
+	}
+	h.Del("Connection")
+	if !h.ConnectionClose() {
+		t.Fatal("first delete dropped the close still listed by the lowercase field")
+	}
+	h.Del("connection")
+	if h.ConnectionClose() {
+		t.Fatal("close survived deleting both fields")
+	}
+}
+
 func TestRequestHeaderDelAbsentSpellingKeepsParsedClose(t *testing.T) {
 	t.Parallel()
 
