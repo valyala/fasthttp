@@ -4691,6 +4691,57 @@ func TestClientRedirectAfterTransportReadsRequestURI(t *testing.T) {
 	}
 }
 
+func TestClientRedirectConnectAuthorityTarget(t *testing.T) {
+	t.Parallel()
+
+	for _, host := range []string{"[::1]:443", "example.com:443"} {
+		for _, hostClient := range []bool{false, true} {
+			for _, disableRedirectPathNormalizing := range []bool{false, true} {
+				t.Run(fmt.Sprintf("host=%s/host_client=%t/redirect=%t", host, hostClient,
+					disableRedirectPathNormalizing), func(t *testing.T) {
+					t.Parallel()
+					requests := make(chan [3]string, 2)
+					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						requests <- [3]string{r.Method, r.Host, r.RequestURI}
+						if len(requests) == 1 {
+							w.Header().Set(HeaderLocation, "?step=2")
+							w.WriteHeader(StatusSeeOther)
+						}
+					}))
+					defer server.Close()
+					dial := func(string) (net.Conn, error) { return net.Dial("tcp", server.Listener.Addr().String()) }
+					var doRedirects func(*Request, *Response, int) error
+					if hostClient {
+						client := &HostClient{Addr: host, Dial: dial}
+						defer client.CloseIdleConnections()
+						doRedirects = client.DoRedirects
+					} else {
+						client := &Client{Dial: dial}
+						defer client.CloseIdleConnections()
+						doRedirects = client.DoRedirects
+					}
+					var req Request
+					var resp Response
+					req.Header.SetMethod(MethodConnect)
+					req.Header.SetHost(host)
+					req.SetRequestURI(host)
+					req.SetTimeout(testTimeout(time.Second))
+					req.DisableRedirectPathNormalizing = disableRedirectPathNormalizing
+					if err := doRedirects(&req, &resp, 1); err != nil {
+						t.Fatal(err)
+					}
+					path := strings.ReplaceAll(strings.ReplaceAll(host, "[", "%5B"), "]", "%5D")
+					for _, want := range [][3]string{{MethodConnect, host, host}, {MethodGet, host, "/" + path + "?step=2"}} {
+						if got := <-requests; got != want {
+							t.Errorf("request = %q, want %q", got, want)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestClientRedirectAbsoluteProxyTarget(t *testing.T) {
 	t.Parallel()
 

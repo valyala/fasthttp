@@ -1371,7 +1371,7 @@ func doRequestFollowRedirects(
 		}
 		redirectURI := AcquireURI()
 		var requestURI []byte
-		if req.DisableRedirectPathNormalizing || req.uri.DisablePathNormalizing {
+		if !req.Header.IsConnect() && (req.DisableRedirectPathNormalizing || req.uri.DisablePathNormalizing) {
 			// RequestURI may have discarded the parsed authority in a transport.
 			// Keep the preceding URL's authority and use the path actually sent.
 			requestURI = req.Header.RequestURI()
