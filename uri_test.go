@@ -227,6 +227,65 @@ func TestURIUpdate(t *testing.T) {
 	testURIUpdate(t, "http://example.com/a/b/c?p=1", "http:", "http://example.com/a/b/c?p=1")
 }
 
+func TestURIUpdatePathWithoutLeadingSlash(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct{ path, want string }{{"dir/start", "/dir/next"}, {"start", "/next"}} {
+		for _, disablePathNormalizing := range []bool{false, true} {
+			for _, useErr := range []bool{false, true} {
+				name := fmt.Sprintf("%s/disable_path_normalizing=%t/error=%t", tc.path, disablePathNormalizing, useErr)
+				t.Run(name, func(t *testing.T) {
+					var u URI
+					u.Update("http://example.com/")
+					u.SetPath(tc.path)
+					u.DisablePathNormalizing = disablePathNormalizing
+					if useErr {
+						if err := u.UpdateBytesErr([]byte("next")); err != nil {
+							t.Fatal(err)
+						}
+					} else {
+						u.Update("next")
+					}
+					if got, want := u.String(), "http://example.com"+tc.want; got != want {
+						t.Fatalf("updated URI = %q, want %q", got, want)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestURIUpdateWithoutPath(t *testing.T) {
+	t.Parallel()
+
+	for _, base := range []string{"http://example.com", "http://example.com?q=1", "http://example.com#fragment"} {
+		for _, disablePathNormalizing := range []bool{false, true} {
+			for _, useErr := range []bool{false, true} {
+				name := fmt.Sprintf("%s/disable_path_normalizing=%t/error=%t", base, disablePathNormalizing, useErr)
+				t.Run(name, func(t *testing.T) {
+					t.Parallel()
+
+					var u URI
+					if err := u.Parse(nil, []byte(base)); err != nil {
+						t.Fatal(err)
+					}
+					u.DisablePathNormalizing = disablePathNormalizing
+					if useErr {
+						if err := u.UpdateBytesErr([]byte("next")); err != nil {
+							t.Fatal(err)
+						}
+					} else {
+						u.Update("next")
+					}
+					if got, want := u.String(), "http://example.com/next"; got != want {
+						t.Fatalf("updated URI = %q, want %q", got, want)
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestURIRejectsMixedBracketHost(t *testing.T) {
 	t.Parallel()
 
